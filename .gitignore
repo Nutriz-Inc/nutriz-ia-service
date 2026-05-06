@@ -1,5 +1,6 @@
 # Documentação interna privada (não compartilhar no repositório)
 CLAUDE.md
+.claude
 
 # Python
 __pycache__/
