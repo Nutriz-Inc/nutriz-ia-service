@@ -1,0 +1,41 @@
+# Documentação interna privada (não compartilhar no repositório)
+CLAUDE.md
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+.venv/
+env/
+.env
+.env.local
+.env.*.local
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+logs/
+*.log
+
+# Postgres data (volume do docker)
+postgres_data/
+
+# Modelos baixados (sentence-transformers cache)
+.cache/
+models/
+
+# Build / distribution
+dist/
+build/
+*.egg-info/
