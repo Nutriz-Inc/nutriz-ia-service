@@ -32,9 +32,9 @@ logs/
 # Postgres data (volume do docker)
 postgres_data/
 
-# Modelos baixados (sentence-transformers cache)
+# Cache de modelos baixados (sentence-transformers, Hugging Face)
 .cache/
-models/
+.models_cache/
 
 # Build / distribution
 dist/
