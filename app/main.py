@@ -1,3 +1,7 @@
+import logging
+
+logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+
 from fastapi import FastAPI
 
 from app.routers import chat_ws, conversations, health, me
