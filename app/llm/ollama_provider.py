@@ -32,3 +32,9 @@ class OllamaProvider(LLMProvider):
                         yield content
                     if data.get("done"):
                         break
+
+    def get_provider_name(self) -> str:
+        return "ollama"
+
+    def get_model_name(self) -> str:
+        return self.model

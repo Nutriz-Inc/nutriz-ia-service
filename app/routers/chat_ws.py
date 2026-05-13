@@ -1,6 +1,7 @@
 # Endpoint WebSocket de chat com a EVA.
 # Autenticacao via query string: ws://host/ws/chat?token=<jwt>
 
+import time
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query, WebSocket, WebSocketDisconnect
@@ -68,15 +69,29 @@ async def websocket_chat(
             )
 
             provider = get_llm_provider()
+
+            start_time = time.time()
             full_response = ""
             async for chunk in provider.stream_chat(messages):
                 full_response += chunk
                 await websocket.send_json({"type": "chunk", "content": chunk})
 
             await websocket.send_json({"type": "done"})
+            latency_ms = int((time.time() - start_time) * 1000)
 
-            await chat_service.save_message(
+            assistant_message = await chat_service.save_message(
                 db, conversation.id, "assistant", full_response
+            )
+
+            await chat_service.save_llm_audit(
+                db=db,
+                user_id=user_id,
+                conversation_id=conversation.id,
+                message_id=assistant_message.id,
+                prompt_full=messages,
+                llm_provider=provider.get_provider_name(),
+                llm_model=provider.get_model_name(),
+                latency_ms=latency_ms,
             )
     except WebSocketDisconnect:
         return

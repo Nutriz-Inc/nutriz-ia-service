@@ -5,7 +5,7 @@ from fastapi import HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import Conversation, Message
+from app.models import Conversation, LlmAudit, Message
 
 
 async def get_or_create_conversation(
@@ -77,3 +77,31 @@ async def get_recent_messages(
     messages = list(result.scalars().all())
     messages.reverse()
     return messages
+
+
+async def save_llm_audit(
+    db: AsyncSession,
+    user_id: str,
+    conversation_id: UUID,
+    message_id: UUID | None,
+    prompt_full: list[dict[str, str]],
+    llm_provider: str,
+    llm_model: str,
+    tokens_input: int | None = None,
+    tokens_output: int | None = None,
+    latency_ms: int | None = None,
+) -> None:
+    audit = LlmAudit(
+        user_id=user_id,
+        conversation_id=conversation_id,
+        message_id=message_id,
+        prompt_full=prompt_full,
+        chunks_used=None,
+        llm_provider=llm_provider,
+        llm_model=llm_model,
+        tokens_input=tokens_input,
+        tokens_output=tokens_output,
+        latency_ms=latency_ms,
+    )
+    db.add(audit)
+    await db.commit()

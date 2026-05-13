@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import DateTime, Integer, String, Text, func
+from sqlalchemy import DateTime, Integer, String, func
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -22,7 +22,7 @@ class LlmAudit(Base):
         UUID(as_uuid=True), nullable=True
     )
     message_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
-    prompt_full: Mapped[str] = mapped_column(Text, nullable=False)
+    prompt_full: Mapped[dict[str, Any] | list[dict[str, Any]]] = mapped_column(JSONB, nullable=False)
     chunks_used: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
     llm_provider: Mapped[str] = mapped_column(String(30), nullable=False)
     llm_model: Mapped[str] = mapped_column(String(50), nullable=False)

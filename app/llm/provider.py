@@ -9,6 +9,14 @@ class LLMProvider(ABC):
     async def stream_chat(self, messages: list[dict[str, str]]) -> AsyncIterator[str]:
         ...
 
+    @abstractmethod
+    def get_provider_name(self) -> str:
+        ...
+
+    @abstractmethod
+    def get_model_name(self) -> str:
+        ...
+
 
 def get_llm_provider() -> LLMProvider:
     provider = settings.LLM_PROVIDER.lower()
