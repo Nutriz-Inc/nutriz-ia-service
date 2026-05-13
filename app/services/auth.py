@@ -1,8 +1,6 @@
-# TODO Leo: confirmar com o backend Go o formato do payload do JWT.
-# Suposição atual: {"user_id": str, "phone": str, "exp": int}.
+# Validação do JWT emitido pelo backend Go.
+# Formato do payload: {id_user: str, exp: int} + claims registrados.
 # Algoritmo: HS256.
-
-from uuid import UUID
 
 import jwt
 from fastapi import Depends, HTTPException, status
@@ -16,8 +14,7 @@ oauth2_scheme = OAuth2PasswordBearer(tokenUrl="login", auto_error=True)
 
 
 class TokenPayload(BaseModel):
-    user_id: UUID
-    phone: str
+    id_user: str
     exp: int
 
 
@@ -27,6 +24,7 @@ def decode_token(token: str) -> TokenPayload:
             token,
             settings.JWT_SECRET,
             algorithms=[settings.JWT_ALGORITHM],
+            leeway=30,
         )
     except jwt.ExpiredSignatureError:
         raise HTTPException(
@@ -48,6 +46,6 @@ def decode_token(token: str) -> TokenPayload:
         )
 
 
-def get_current_user_id(token: str = Depends(oauth2_scheme)) -> UUID:
+def get_current_user_id(token: str = Depends(oauth2_scheme)) -> str:
     payload = decode_token(token)
-    return payload.user_id
+    return payload.id_user

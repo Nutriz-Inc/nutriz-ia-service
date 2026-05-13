@@ -1,39 +1,30 @@
-# TODO Leo: schema espelhado da tabela users do backend Go.
-# Confirmar com o Leo: campos exatos, tipos, nomes (PT ou EN).
-# Este modelo é READ-ONLY no Python. Nunca escrever, apenas ler.
+# Modelo espelhado da tabela "user" do backend Go.
+# READ-ONLY no Python. Nunca escrever, apenas ler.
 
-import uuid
-from datetime import date, datetime
+from datetime import datetime
+from decimal import Decimal
 
-from sqlalchemy import Date, DateTime, String, func
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy import DateTime, Numeric, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database import Base
 
 
 class User(Base):
-    __tablename__ = "users"
+    __tablename__ = "user"
 
-    id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
-        primary_key=True,
-        server_default=func.gen_random_uuid(),
-    )
-    name: Mapped[str | None] = mapped_column(String(100), nullable=True)
-    phone: Mapped[str] = mapped_column(String(20), unique=True, nullable=False)
-    cep: Mapped[str | None] = mapped_column(String(9), nullable=True)
-    data_nascimento_bebe: Mapped[date | None] = mapped_column(Date, nullable=True)
-    consent_lgpd_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True),
-        server_default=func.now(),
-        nullable=False,
-    )
-    updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True),
-        server_default=func.now(),
-        nullable=False,
-    )
+    id_user: Mapped[str] = mapped_column(String(36), primary_key=True)
+    type: Mapped[str] = mapped_column(String(20), nullable=False)
+    name: Mapped[str] = mapped_column(String(120), nullable=False)
+    cpf: Mapped[str] = mapped_column(String(11), unique=True, nullable=False)
+    birth_date: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    phone_number: Mapped[str] = mapped_column(String(20), unique=True, nullable=False)
+    email: Mapped[str] = mapped_column(String(255), unique=True, nullable=False)
+    password: Mapped[str] = mapped_column(String(255), nullable=False)
+    milk_donated: Mapped[Decimal | None] = mapped_column(Numeric, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    created_by: Mapped[str] = mapped_column(String(36), nullable=False)
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    updated_by: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    removed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    removed_by: Mapped[str | None] = mapped_column(String(36), nullable=True)

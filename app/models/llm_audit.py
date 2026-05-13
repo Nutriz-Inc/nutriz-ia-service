@@ -17,7 +17,7 @@ class LlmAudit(Base):
         primary_key=True,
         server_default=func.gen_random_uuid(),
     )
-    user_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    user_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
     conversation_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), nullable=True
     )
