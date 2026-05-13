@@ -2,7 +2,7 @@ from datetime import datetime, timezone
 from uuid import UUID
 
 from fastapi import HTTPException, status
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import Conversation, LlmAudit, Message
@@ -105,3 +105,54 @@ async def save_llm_audit(
     )
     db.add(audit)
     await db.commit()
+
+
+async def list_conversations(
+    db: AsyncSession,
+    user_id: str,
+    page: int = 1,
+    page_size: int = 20,
+) -> tuple[list[Conversation], int]:
+    count_result = await db.execute(
+        select(func.count(Conversation.id)).where(Conversation.user_id == user_id)
+    )
+    total = count_result.scalar_one()
+
+    offset = (page - 1) * page_size
+    result = await db.execute(
+        select(Conversation)
+        .where(Conversation.user_id == user_id)
+        .order_by(Conversation.last_message_at.desc())
+        .offset(offset)
+        .limit(page_size)
+    )
+    conversations = list(result.scalars().all())
+    return conversations, total
+
+
+async def list_messages(
+    db: AsyncSession,
+    conversation_id: UUID,
+    user_id: str,
+) -> list[Message]:
+    conversation_result = await db.execute(
+        select(Conversation).where(Conversation.id == conversation_id)
+    )
+    conversation = conversation_result.scalar_one_or_none()
+    if conversation is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Conversation not found",
+        )
+    if conversation.user_id != user_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Conversation does not belong to user",
+        )
+
+    result = await db.execute(
+        select(Message)
+        .where(Message.conversation_id == conversation_id)
+        .order_by(Message.created_at.asc())
+    )
+    return list(result.scalars().all())
