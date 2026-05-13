@@ -18,7 +18,7 @@ class Conversation(Base):
     )
     user_id: Mapped[str] = mapped_column(
         String(36),
-        ForeignKey('"user".id_user'),
+        ForeignKey("user.id_user"),
         nullable=False,
         index=True,
     )
