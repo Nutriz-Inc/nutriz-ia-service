@@ -24,6 +24,7 @@ def decode_token(token: str) -> TokenPayload:
             token,
             settings.JWT_SECRET,
             algorithms=[settings.JWT_ALGORITHM],
+            leeway=30,
         )
     except jwt.ExpiredSignatureError:
         raise HTTPException(
