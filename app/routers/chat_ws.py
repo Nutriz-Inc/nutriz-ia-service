@@ -1,7 +1,9 @@
 # Endpoint WebSocket de chat com a EVA.
 # Autenticacao via query string: ws://host/ws/chat?token=<jwt>
 
+import logging
 import time
+import traceback
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query, WebSocket, WebSocketDisconnect
@@ -13,6 +15,8 @@ from app.services import chat_service
 from app.services.auth_ws import authenticate_websocket
 from app.services.eva_prompt import build_messages_for_llm
 
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["chat"])
 
@@ -41,7 +45,10 @@ async def websocket_chat(
             db, user_id, conv_uuid
         )
     except Exception as e:
-        await websocket.send_json({"type": "error", "message": str(e)})
+        error_msg = f"{type(e).__name__}: {e}"
+        logger.error(f"Erro ao criar/recuperar conversa: {error_msg}")
+        logger.error(traceback.format_exc())
+        await websocket.send_json({"type": "error", "message": error_msg})
         await websocket.close()
         return
 
@@ -96,8 +103,11 @@ async def websocket_chat(
     except WebSocketDisconnect:
         return
     except Exception as e:
+        error_msg = f"{type(e).__name__}: {e}"
+        logger.error(f"Erro no websocket_chat: {error_msg}")
+        logger.error(traceback.format_exc())
         try:
-            await websocket.send_json({"type": "error", "message": str(e)})
+            await websocket.send_json({"type": "error", "message": error_msg})
             await websocket.close()
         except Exception:
             pass
