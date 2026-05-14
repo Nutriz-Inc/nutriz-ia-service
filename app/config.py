@@ -17,6 +17,7 @@ class Settings(BaseSettings):
     OLLAMA_BASE_URL: str = "http://localhost:11434"
     GROQ_MODEL: str = "llama-3.3-70b-versatile"
     OLLAMA_MODEL: str = "llama3.2:3b"
+    EMBEDDING_MODEL: str = "paraphrase-multilingual-MiniLM-L12-v2"
     APP_ENV: str = "development"
     LOG_LEVEL: str = "INFO"
 
