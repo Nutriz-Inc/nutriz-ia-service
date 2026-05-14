@@ -1,4 +1,5 @@
 from datetime import datetime, timezone
+from typing import Any
 from uuid import UUID
 
 from fastapi import HTTPException, status
@@ -90,13 +91,14 @@ async def save_llm_audit(
     tokens_input: int | None = None,
     tokens_output: int | None = None,
     latency_ms: int | None = None,
+    chunks_used: list[dict[str, Any]] | None = None,
 ) -> None:
     audit = LlmAudit(
         user_id=user_id,
         conversation_id=conversation_id,
         message_id=message_id,
         prompt_full=prompt_full,
-        chunks_used=None,
+        chunks_used=chunks_used,
         llm_provider=llm_provider,
         llm_model=llm_model,
         tokens_input=tokens_input,
