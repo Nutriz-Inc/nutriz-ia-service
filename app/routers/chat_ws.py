@@ -13,7 +13,8 @@ from app.database import get_db
 from app.llm.provider import get_llm_provider
 from app.services import chat_service
 from app.services.auth_ws import authenticate_websocket
-from app.services.eva_prompt import build_messages_for_llm
+from app.services.eva_prompt import build_messages_for_llm_with_rag
+from app.services.rag_service import search_chunks
 
 
 logger = logging.getLogger(__name__)
@@ -69,7 +70,10 @@ async def websocket_chat(
             history = await chat_service.get_recent_messages(
                 db, conversation.id, limit=10
             )
-            messages = build_messages_for_llm(history, user_message)
+
+            rag_chunks = await search_chunks(db, user_message, top_k=4)
+
+            messages = build_messages_for_llm_with_rag(history, user_message, rag_chunks)
 
             await chat_service.save_message(
                 db, conversation.id, "user", user_message
@@ -90,6 +94,15 @@ async def websocket_chat(
                 db, conversation.id, "assistant", full_response
             )
 
+            chunks_used_audit = [
+                {
+                    "source": c.source,
+                    "score": c.score,
+                    "preview": c.content[:200],
+                }
+                for c in rag_chunks
+            ]
+
             await chat_service.save_llm_audit(
                 db=db,
                 user_id=user_id,
@@ -99,6 +112,7 @@ async def websocket_chat(
                 llm_provider=provider.get_provider_name(),
                 llm_model=provider.get_model_name(),
                 latency_ms=latency_ms,
+                chunks_used=chunks_used_audit,
             )
     except WebSocketDisconnect:
         return
