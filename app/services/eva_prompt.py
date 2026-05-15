@@ -1,4 +1,5 @@
 from app.models import Message
+from app.schemas.profile import NutrizProfile
 from app.schemas.rag import ChunkSearchResult
 
 
@@ -46,9 +47,15 @@ def build_messages_for_llm_with_rag(
     history: list[Message],
     new_user_message: str,
     chunks: list[ChunkSearchResult],
+    profile: NutrizProfile | None = None,
 ) -> list[dict[str, str]]:
     context_block = _format_chunks_as_context(chunks)
-    enriched_system_prompt = f"{EVA_SYSTEM_PROMPT}\n\n{context_block}"
+
+    system_parts = [EVA_SYSTEM_PROMPT]
+    if profile is not None:
+        system_parts.append(_format_profile_as_context(profile))
+    system_parts.append(context_block)
+    enriched_system_prompt = "\n\n".join(system_parts)
 
     messages: list[dict[str, str]] = [
         {"role": "system", "content": enriched_system_prompt}
@@ -97,3 +104,41 @@ def _format_chunks_as_context(chunks: list[ChunkSearchResult]) -> str:
         context_parts.append("")
 
     return "\n".join(context_parts)
+
+
+def _format_profile_as_context(profile: NutrizProfile) -> str:
+    parts = ["PERFIL DA NUTRIZ (use para personalizar a resposta):"]
+    parts.append(f"- Nome: {profile.name}")
+
+    if profile.baby is not None:
+        parts.append(f"- Bebe: {profile.baby.age_description}")
+    else:
+        parts.append("- Bebe: nao cadastrado")
+
+    if profile.address is not None:
+        parts.append(
+            f"- Localizacao: {profile.address.city}/{profile.address.state}, "
+            f"bairro {profile.address.neighborhood}"
+        )
+    else:
+        parts.append("- Localizacao: nao cadastrada")
+
+    parts.append("")
+    parts.append("INSTRUCOES DE USO DO PERFIL:")
+    parts.append(
+        "- Personalize a resposta com base no perfil quando relevante (idade do bebe, localizacao)"
+    )
+    parts.append(
+        "- Trate a nutriz pelo primeiro nome quando apropriado, sem repetir em toda mensagem"
+    )
+    parts.append(
+        "- Considere a fase do bebe ao orientar sobre doacao (colostro, transicao, leite maduro)"
+    )
+    parts.append(
+        "- Se o perfil tiver campos faltando (bebe ou endereco), nao mencione a ausencia"
+    )
+    parts.append(
+        "- NUNCA invente dados que nao estao no perfil (idade exata, CEP completo, nome do bebe se ausente)"
+    )
+
+    return "\n".join(parts)
