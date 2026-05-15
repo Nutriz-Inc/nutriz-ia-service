@@ -13,7 +13,9 @@ from app.database import get_db
 from app.llm.provider import get_llm_provider
 from app.services import chat_service
 from app.services.auth_ws import authenticate_websocket
+from app.services.consent_service import has_valid_consent
 from app.services.eva_prompt import build_messages_for_llm_with_rag
+from app.services.profile_service import get_nutriz_profile
 from app.services.rag_service import search_chunks
 
 
@@ -33,6 +35,15 @@ async def websocket_chat(
 
     user_id = await authenticate_websocket(websocket, token)
     if user_id is None:
+        return
+
+    if not await has_valid_consent(db, user_id):
+        await websocket.send_json({
+            "type": "error",
+            "code": "lgpd_consent_required",
+            "message": "E necessario aceitar os termos de uso antes de iniciar o chat.",
+        })
+        await websocket.close(code=4003, reason="LGPD consent required")
         return
 
     try:
@@ -57,6 +68,10 @@ async def websocket_chat(
         {"type": "conversation", "conversation_id": str(conversation.id)}
     )
 
+    nutriz_profile = await get_nutriz_profile(db, user_id)
+    if nutriz_profile is None:
+        logger.warning(f"Perfil nao encontrado para user_id={user_id}, EVA seguira sem personalizacao")
+
     try:
         while True:
             data = await websocket.receive_json()
@@ -73,7 +88,12 @@ async def websocket_chat(
 
             rag_chunks = await search_chunks(db, user_message, top_k=4)
 
-            messages = build_messages_for_llm_with_rag(history, user_message, rag_chunks)
+            messages = build_messages_for_llm_with_rag(
+                history,
+                user_message,
+                rag_chunks,
+                profile=nutriz_profile,
+            )
 
             await chat_service.save_message(
                 db, conversation.id, "user", user_message
