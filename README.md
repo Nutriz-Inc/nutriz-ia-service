@@ -4,7 +4,7 @@ Microsserviço de inteligência artificial da plataforma **Nutriz**, em parceria
 
 ---
 
-## 🤱 Sobre a EVA
+##  Sobre a EVA
 
 A EVA é uma assistente virtual especializada em:
 
@@ -23,7 +23,7 @@ A EVA é uma assistente virtual especializada em:
 
 ---
 
-## 🏗️ Arquitetura
+##  Arquitetura
 
 ```
 ┌───────────────────┐
@@ -44,7 +44,7 @@ O `nutriz-ia-service` é **autônomo**. Usa JWT compartilhado com o backend Go p
 
 ---
 
-## 🛠️ Stack
+##  Stack
 
 | Camada | Tecnologia | Versão |
 |---|---|---|
@@ -61,7 +61,7 @@ O `nutriz-ia-service` é **autônomo**. Usa JWT compartilhado com o backend Go p
 
 ---
 
-## ✅ Pré-requisitos
+##  Pré-requisitos
 
 - **Python 3.13** ou superior
 - **Docker** + **Docker Compose**
@@ -70,7 +70,7 @@ O `nutriz-ia-service` é **autônomo**. Usa JWT compartilhado com o backend Go p
 
 ---
 
-## 🚀 Setup
+##  Setup
 
 ### 1. Clonar o projeto
 
@@ -93,7 +93,7 @@ source .venv/bin/activate
 
 ### 3. Instalar dependências
 
-> ⚠️ **Instale o PyTorch CPU-only PRIMEIRO** para evitar baixar a versão com CUDA (~2 GB).
+>  **Instale o PyTorch CPU-only PRIMEIRO** para evitar baixar a versão com CUDA (~2 GB).
 
 ```bash
 pip install torch --index-url https://download.pytorch.org/whl/cpu
@@ -148,7 +148,7 @@ Os protocolos da rBLH/Fiocruz/Lactare estão em `docs/protocolos/` como arquivos
 python -m scripts.ingest_protocols
 ```
 
-> ⚠️ **Primeira execução**: o script baixa o modelo de embeddings da Hugging Face (~470 MB). Faz uma vez só — fica cacheado em `~/.cache/huggingface/`.
+>  **Primeira execução**: o script baixa o modelo de embeddings da Hugging Face (~470 MB). Faz uma vez só — fica cacheado em `~/.cache/huggingface/`.
 
 ### 8. Iniciar o servidor
 
@@ -160,7 +160,7 @@ A API estará disponível em `http://localhost:8000`.
 
 ---
 
-## 📡 Endpoints
+##  Endpoints
 
 ### REST
 
@@ -182,7 +182,7 @@ A API estará disponível em `http://localhost:8000`.
 
 ---
 
-## 📁 Estrutura de pastas
+##  Estrutura de pastas
 
 ```
 nutriz-ia-service/
@@ -237,7 +237,7 @@ nutriz-ia-service/
 
 ---
 
-## 🔐 Variáveis de ambiente
+##  Variáveis de ambiente
 
 | Variável | Descrição | Default |
 |---|---|---|
@@ -256,7 +256,7 @@ nutriz-ia-service/
 
 ---
 
-## 🧪 Testando localmente
+##  Testando localmente
 
 ### Gerar um token JWT manualmente
 
@@ -305,7 +305,7 @@ asyncio.run(chat())
 
 ---
 
-## 🧠 Decisões arquiteturais
+##  Decisões arquiteturais
 
 - **Banco compartilhado em produção, separado em dev**: o IA service e o backend Go terão o mesmo banco em produção. Em dev, isolamento por simplicidade.
 - **Tabelas espelhadas do Go são read-only**: `user`, `user_baby`, `address`, `consent_log` são mantidas pelo backend Go.
@@ -320,7 +320,7 @@ asyncio.run(chat())
 
 ---
 
-## 🌿 Convenção de branches
+##  Convenção de branches
 
 - `main` — versão estável (produção)
 - `develop` — integração de features
@@ -333,9 +333,9 @@ PRs são abertos sempre contra `develop`. Commits seguem [Conventional Commits](
 
 ---
 
-## 🗺️ Roadmap
+##  Roadmap
 
-### ✅ Concluído
+###  Concluído
 
 - **Sprint 1**: Setup técnico (Docker, FastAPI, Alembic)
 - **Sprint 2**: Modelos ORM + migrations alinhadas com backend Go
@@ -343,7 +343,7 @@ PRs são abertos sempre contra `develop`. Commits seguem [Conventional Commits](
 - **Sprint 4**: Sistema RAG completo (sentence-transformers + busca semântica + refinamento de prompts)
 - **Sprint 5**: Personalização por perfil consolidado + bloqueio LGPD
 
-### 📋 Em planejamento
+###  Em planejamento
 
 - **Sprint 6**: Refinamentos do RAG (threshold de score, mais protocolos `.md`, avaliação automatizada)
 - Integração com WhatsApp via webhook
@@ -354,13 +354,13 @@ PRs são abertos sempre contra `develop`. Commits seguem [Conventional Commits](
 
 ---
 
-## 📖 Documentação adicional
+##  Documentação adicional
 
 - [`docs/perguntas-teste.md`](./docs/perguntas-teste.md) — Bateria de perguntas reais para validação do RAG
 - [`docs/protocolos/`](./docs/protocolos/) — Protocolos da rBLH/Fiocruz em Markdown
 
 ---
 
-## 📝 Licença
+##  Licença
 
 Projeto acadêmico — Challenge FIAP 2026 em parceria com Eurofarma/Lactare.
