@@ -1,4 +1,5 @@
 from abc import ABC, abstractmethod
+from functools import lru_cache
 from typing import AsyncIterator
 
 from app.config import settings
@@ -18,6 +19,10 @@ class LLMProvider(ABC):
         ...
 
 
+# Cache de instancia unica: reinstanciar o provider (e seu client HTTP) a cada
+# turno descartava o connection pooling e pagava novo handshake TLS por mensagem.
+# Em testes, use get_llm_provider.cache_clear() ao trocar LLM_PROVIDER.
+@lru_cache(maxsize=1)
 def get_llm_provider() -> LLMProvider:
     provider = settings.LLM_PROVIDER.lower()
     if provider == "groq":
