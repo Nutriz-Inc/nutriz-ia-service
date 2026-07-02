@@ -124,11 +124,6 @@ async def websocket_chat(
                 profile=nutriz_profile,
             )
 
-            with turn_timer.measure("t_persist_user_msg"):
-                await chat_service.save_message(
-                    db, conversation.id, "user", user_message
-                )
-
             start_time = time.time()
             first_token_at: float | None = None
             full_response = ""
@@ -144,6 +139,13 @@ async def websocket_chat(
             await websocket.send_json({"type": "done"})
             latency_ms = int((time.time() - start_time) * 1000)
             turn_timer.record("t_llm_total", latency_ms)
+
+            # Persistencia fora do caminho critico: gravar depois do streaming
+            # nao atrasa o primeiro token. Ordem user -> assistant preservada.
+            with turn_timer.measure("t_persist_user_msg"):
+                await chat_service.save_message(
+                    db, conversation.id, "user", user_message
+                )
 
             with turn_timer.measure("t_persist_assistant"):
                 assistant_message = await chat_service.save_message(
