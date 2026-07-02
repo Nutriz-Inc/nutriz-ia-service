@@ -22,12 +22,15 @@ async def search_chunks(
     query: str,
     top_k: int = 4,
     timer: PhaseTimer | None = None,
+    query_embedding: list[float] | None = None,
 ) -> list[ChunkSearchResult]:
-    # Medicao separada de embedding (CPU) e busca vetorial (I/O) para o profiling
-    start = time.perf_counter()
-    query_embedding = await embeddings_service.encode_async(query)
-    if timer is not None:
-        timer.record("t_embedding", (time.perf_counter() - start) * 1000)
+    # Embedding pode vir pre-computado (calculado em paralelo com outro I/O
+    # pelo chamador). Se nao vier, calcula aqui.
+    if query_embedding is None:
+        start = time.perf_counter()
+        query_embedding = await embeddings_service.encode_async(query)
+        if timer is not None:
+            timer.record("t_embedding", (time.perf_counter() - start) * 1000)
 
     distance = KbChunk.embedding.cosine_distance(query_embedding)
 

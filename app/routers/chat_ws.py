@@ -1,6 +1,7 @@
 # Endpoint WebSocket de chat com a EVA.
 # Autenticacao via query string: ws://host/ws/chat?token=<jwt>
 
+import asyncio
 import logging
 import time
 import traceback
@@ -14,6 +15,7 @@ from app.llm.provider import get_llm_provider
 from app.services import chat_service
 from app.services.auth_ws import authenticate_websocket
 from app.services.consent_service import has_valid_consent
+from app.services.embeddings import embeddings_service
 from app.services.eva_prompt import build_messages_for_llm_with_rag
 from app.services.latency import PhaseTimer
 from app.services.profile_service import get_nutriz_profile
@@ -97,13 +99,22 @@ async def websocket_chat(
 
             turn_timer = PhaseTimer()
 
-            with turn_timer.measure("t_history"):
-                history = await chat_service.get_recent_messages(
-                    db, conversation.id, limit=10
+            # Encode do embedding (CPU em thread) e busca do historico (I/O no
+            # banco) sao independentes: rodam em paralelo. Nao e possivel
+            # paralelizar duas queries na mesma AsyncSession, mas encode nao usa
+            # a sessao.
+            with turn_timer.measure("t_history_e_embedding"):
+                history, query_embedding = await asyncio.gather(
+                    chat_service.get_recent_messages(db, conversation.id, limit=10),
+                    embeddings_service.encode_async(user_message),
                 )
 
             rag_chunks = await search_chunks(
-                db, user_message, top_k=4, timer=turn_timer
+                db,
+                user_message,
+                top_k=4,
+                timer=turn_timer,
+                query_embedding=query_embedding,
             )
 
             messages = build_messages_for_llm_with_rag(
