@@ -2,6 +2,7 @@
 # Autenticacao via query string: ws://host/ws/chat?token=<jwt>
 
 import asyncio
+import json
 import logging
 import time
 import traceback
@@ -89,7 +90,21 @@ async def websocket_chat(
 
     try:
         while True:
-            data = await websocket.receive_json()
+            # JSON invalido ou payload que nao e objeto nao pode derrubar a
+            # conexao: responde erro estruturado e segue aguardando
+            try:
+                data = await websocket.receive_json()
+            except json.JSONDecodeError:
+                await websocket.send_json(
+                    {"type": "error", "message": "Invalid JSON payload"}
+                )
+                continue
+            if not isinstance(data, dict):
+                await websocket.send_json(
+                    {"type": "error", "message": "Payload must be a JSON object"}
+                )
+                continue
+
             user_message = data.get("message")
             if not user_message:
                 await websocket.send_json(
