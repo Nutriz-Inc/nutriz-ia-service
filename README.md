@@ -72,14 +72,38 @@ O `nutriz-ia-service` é **autônomo**. Usa JWT compartilhado com o backend Go p
 
 ##  Setup
 
-### 1. Clonar o projeto
+###  Caminho rápido: tudo em Docker (recomendado)
+
+Não precisa de Python instalado — o sistema completo (app + banco) sobe com um comando:
 
 ```bash
 git clone https://github.com/Nutriz-Inc/nutriz-ia-service.git
 cd nutriz-ia-service
+cp .env.example .env       # preencha JWT_SECRET e GROQ_API_KEY
+docker compose up -d
 ```
 
-### 2. Criar ambiente virtual
+O que acontece na subida:
+
+1. Banco `pgvector/pgvector:pg16` sobe e fica `healthy`
+2. A app espera o banco, aplica as **migrations automaticamente** (`alembic upgrade head`) e inicia
+3. Na **primeira subida**, o modelo de embeddings (~470 MB) é baixado para o volume `models_cache` e pré-aquecido — leva alguns minutos; o healthcheck tem `start_period` para acomodar
+4. EVA respondendo em `ws://localhost:8000/ws/chat`
+
+```bash
+docker compose ps                  # app e db healthy
+curl http://localhost:8000/health  # {"status": "ok", ...}
+```
+
+Para ingerir os protocolos do RAG dentro do container:
+
+```bash
+docker compose exec app python -m scripts.ingest_protocols
+```
+
+###  Caminho alternativo: app local (desenvolvimento com hot reload)
+
+### 1. Criar ambiente virtual
 
 ```bash
 # Windows (PowerShell)
@@ -91,18 +115,19 @@ python -m venv .venv
 source .venv/bin/activate
 ```
 
-### 3. Instalar dependências
+### 2. Instalar dependências
 
 >  **Instale o PyTorch CPU-only PRIMEIRO** para evitar baixar a versão com CUDA (~2 GB).
 
 ```bash
 pip install torch --index-url https://download.pytorch.org/whl/cpu
-pip install -r requirements.txt
+pip install -r requirements.txt        # producao
+pip install -r requirements-dev.txt    # + ferramentas de teste
 ```
 
-### 4. Configurar variáveis de ambiente
+### 3. Configurar variáveis de ambiente
 
-Crie o arquivo `.env` na raiz do projeto (não commitado):
+Copie `.env.example` para `.env` (não commitado) e preencha:
 
 ```env
 # Banco de dados
@@ -127,20 +152,20 @@ APP_ENV=development
 LOG_LEVEL=INFO
 ```
 
-### 5. Subir o banco de dados
+### 4. Subir só o banco de dados
 
 ```bash
-docker compose up -d
+docker compose up -d db
 docker ps  # confere se nutriz-ia-db está healthy
 ```
 
-### 6. Aplicar migrations
+### 5. Aplicar migrations
 
 ```bash
 alembic upgrade head
 ```
 
-### 7. Ingerir protocolos no banco vetorial
+### 6. Ingerir protocolos no banco vetorial
 
 Os protocolos da rBLH/Fiocruz/Lactare estão em `docs/protocolos/` como arquivos Markdown. Para ingerir (gera embeddings e popula `kb_chunks`):
 
@@ -150,13 +175,15 @@ python -m scripts.ingest_protocols
 
 >  **Primeira execução**: o script baixa o modelo de embeddings da Hugging Face (~470 MB). Faz uma vez só — fica cacheado em `~/.cache/huggingface/`.
 
-### 8. Iniciar o servidor
+### 7. Iniciar o servidor
 
 ```bash
 uvicorn app.main:app --reload --port 8000
 ```
 
 A API estará disponível em `http://localhost:8000`.
+
+>  No startup, o modelo de embeddings é pré-aquecido (elimina cold start de ~5s na primeira mensagem). Na primeira execução ele é baixado da Hugging Face (~470 MB).
 
 ---
 
@@ -229,9 +256,18 @@ nutriz-ia-service/
 ├── migrations/                      # Alembic
 │   └── versions/
 ├── scripts/
-│   └── ingest_protocols.py          # Script de ingestão de .md
-├── docker-compose.yml
-├── requirements.txt
+│   ├── ingest_protocols.py          # Script de ingestão de .md
+│   └── bench_ws.py                  # Benchmark de latência do chat
+├── tests/
+│   ├── conftest.py                  # Fixtures (banco de teste, FakeProvider, seeds)
+│   ├── unit/
+│   └── integration/
+├── docker/
+│   └── entrypoint.sh                # Migrations automáticas + uvicorn
+├── Dockerfile                       # Python 3.13 slim, torch CPU, non-root
+├── docker-compose.yml               # App + banco + healthchecks
+├── requirements.txt                 # Dependências de produção (pinadas)
+├── requirements-dev.txt             # + pytest e afins
 └── alembic.ini
 ```
 
@@ -305,6 +341,34 @@ asyncio.run(chat())
 
 ---
 
+##  Testes
+
+A suíte roda **offline** (LLM mockado, embeddings determinísticos) contra um banco pgvector de teste dedicado. Requer apenas o banco do compose no ar:
+
+```bash
+docker compose up -d db
+pip install -r requirements-dev.txt
+
+pytest -v                      # tudo (unit + integração)
+pytest tests/unit -v           # só unitários
+pytest tests/integration -v    # só integração
+pytest --cov=app/services --cov=app/llm --cov-report=term-missing
+```
+
+Cobertura atual: **99% em `app/services` + `app/llm`** (meta: ≥ 80%). O CI (GitHub Actions) roda a mesma suíte com a mesma imagem `pgvector/pgvector:pg16`. Detalhes em [`docs/testes.md`](./docs/testes.md).
+
+##  Performance
+
+A latência do chat é instrumentada por fase (logs `[latency]`): auth, consent, perfil, embedding, busca vetorial, primeiro token do LLM, streaming total e persistência. Benchmark de ponta a ponta:
+
+```bash
+python -m scripts.bench_ws --turns 6
+```
+
+Resultados atuais (Groq, após otimizações): **primeiro token < 2s em todos os turnos** (mediana ~660ms em turnos quentes) e overhead do pipeline < 200ms/turno. Baseline, otimizações e ganhos medidos em [`docs/performance.md`](./docs/performance.md).
+
+---
+
 ##  Decisões arquiteturais
 
 - **Banco compartilhado em produção, separado em dev**: o IA service e o backend Go terão o mesmo banco em produção. Em dev, isolamento por simplicidade.
@@ -342,20 +406,26 @@ PRs são abertos sempre contra `develop`. Commits seguem [Conventional Commits](
 - **Sprint 3**: WebSocket de chat com streaming via Groq + auditoria LGPD
 - **Sprint 4**: Sistema RAG completo (sentence-transformers + busca semântica + refinamento de prompts)
 - **Sprint 5**: Personalização por perfil consolidado + bloqueio LGPD
+- **Otimização de latência**: instrumentação por fase, warm-up de embeddings, provider reutilizado, persistência fora do caminho crítico, threshold de score no RAG (ver [`docs/performance.md`](./docs/performance.md))
+- **Testes automatizados**: suíte unit + integração offline, 99% de cobertura em services/llm, CI com pgvector (ver [`docs/testes.md`](./docs/testes.md))
+- **Containerização completa**: `docker compose up -d` sobe app + banco com migrations automáticas e healthchecks
 
 ###  Em planejamento
 
-- **Sprint 6**: Refinamentos do RAG (threshold de score, mais protocolos `.md`, avaliação automatizada)
+- Mais protocolos `.md` + avaliação automatizada do RAG
+- Chat público sem login (`/ws/chat-public`) — Sprint 9
+- Copiloto admin/Lactare — Sprint 8
 - Integração com WhatsApp via webhook
 - Sistema de feedback da nutriz (👍/👎 nas respostas)
-- Métricas de qualidade do RAG
-- Testes automatizados (unit + integração)
 - Captura de tokens consumidos (`tokens_input`/`tokens_output`)
 
 ---
 
 ##  Documentação adicional
 
+- [`docs/performance.md`](./docs/performance.md) — Baseline de latência, otimizações e ganhos medidos
+- [`docs/testes.md`](./docs/testes.md) — Como rodar a suíte, estrutura e convenções
+- [`docs/decisoes.md`](./docs/decisoes.md) — Registro de decisões técnicas
 - [`docs/perguntas-teste.md`](./docs/perguntas-teste.md) — Bateria de perguntas reais para validação do RAG
 - [`docs/protocolos/`](./docs/protocolos/) — Protocolos da rBLH/Fiocruz em Markdown
 

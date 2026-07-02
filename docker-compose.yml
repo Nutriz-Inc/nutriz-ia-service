@@ -1,4 +1,29 @@
 services:
+  app:
+    build: .
+    container_name: nutriz-ia-app
+    ports:
+      - "8000:8000"
+    env_file: .env
+    environment:
+      # Dentro da rede do compose, o banco e o ollama tem hostname proprio
+      DATABASE_URL: postgresql+asyncpg://postgres:postgres@db:5432/nutriz_ia
+      OLLAMA_BASE_URL: http://ollama:11434
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      # Cache do modelo de embeddings (~470MB): baixa 1x, sobrevive a rebuilds
+      - models_cache:/models-cache
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=3)"]
+      interval: 15s
+      timeout: 5s
+      retries: 20
+      # 1a subida baixa o modelo de embeddings e roda warm-up
+      start_period: 300s
+
   db:
     image: pgvector/pgvector:pg16
     container_name: nutriz-ia-db
@@ -29,3 +54,4 @@ services:
 volumes:
   postgres_data:
   ollama_data:
+  models_cache:
