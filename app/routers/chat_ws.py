@@ -109,10 +109,12 @@ async def websocket_chat(
                     embeddings_service.encode_async(user_message),
                 )
 
+            # top-3 (era top-4): menos tokens de input = primeiro token mais
+            # rapido no Groq, sem perda relevante de contexto no RAG
             rag_chunks = await search_chunks(
                 db,
                 user_message,
-                top_k=4,
+                top_k=3,
                 timer=turn_timer,
                 query_embedding=query_embedding,
             )

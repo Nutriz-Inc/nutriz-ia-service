@@ -17,12 +17,18 @@ from app.services.latency import PhaseTimer
 logger = logging.getLogger(__name__)
 
 
+# Chunks com score abaixo do minimo sao descartados: injetar chunk irrelevante
+# infla o prompt (mais latencia no LLM) e pode induzir resposta fora de contexto.
+MIN_SCORE_THRESHOLD = 0.3
+
+
 async def search_chunks(
     db: AsyncSession,
     query: str,
     top_k: int = 4,
     timer: PhaseTimer | None = None,
     query_embedding: list[float] | None = None,
+    min_score: float = MIN_SCORE_THRESHOLD,
 ) -> list[ChunkSearchResult]:
     # Embedding pode vir pre-computado (calculado em paralelo com outro I/O
     # pelo chamador). Se nao vier, calcula aqui.
@@ -49,6 +55,8 @@ async def search_chunks(
     search_results: list[ChunkSearchResult] = []
     for chunk, distance_value in rows:
         score = max(0.0, 1.0 - float(distance_value))
+        if score < min_score:
+            continue
         search_results.append(
             ChunkSearchResult(
                 content=chunk.content,

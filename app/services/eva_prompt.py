@@ -3,6 +3,11 @@ from app.schemas.profile import NutrizProfile
 from app.schemas.rag import ChunkSearchResult
 
 
+# Limite de palavras por chunk injetado no prompt: chunks de ate 400 palavras
+# inflavam o input do LLM; 300 mantem o conteudo util com menos latencia.
+MAX_CHUNK_WORDS = 300
+
+
 EVA_SYSTEM_PROMPT = """Você é a EVA, assistente virtual da plataforma Nutriz, da Lactare/Eurofarma, dedicada à doação de leite humano.
 
 Quem você atende:
@@ -100,10 +105,17 @@ def _format_chunks_as_context(chunks: list[ChunkSearchResult]) -> str:
         context_parts.append(
             f"[Trecho {i} - fonte: {chunk.source} - relevancia: {chunk.score:.2f}]"
         )
-        context_parts.append(chunk.content)
+        context_parts.append(_truncate_words(chunk.content, MAX_CHUNK_WORDS))
         context_parts.append("")
 
     return "\n".join(context_parts)
+
+
+def _truncate_words(text: str, max_words: int) -> str:
+    words = text.split()
+    if len(words) <= max_words:
+        return text
+    return " ".join(words[:max_words]) + " [...]"
 
 
 def _format_profile_as_context(profile: NutrizProfile) -> str:
