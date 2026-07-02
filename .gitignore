@@ -29,6 +29,12 @@ Thumbs.db
 logs/
 *.log
 
+# Testes
+.pytest_cache/
+.coverage
+htmlcov/
+skills-lock.json
+
 # Postgres data (volume do docker)
 postgres_data/
 
