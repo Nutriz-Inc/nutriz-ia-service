@@ -2,6 +2,7 @@
 # Autenticacao via query string: ws://host/ws/chat?token=<jwt>
 
 import asyncio
+import json
 import logging
 import time
 import traceback
@@ -89,7 +90,21 @@ async def websocket_chat(
 
     try:
         while True:
-            data = await websocket.receive_json()
+            # JSON invalido ou payload que nao e objeto nao pode derrubar a
+            # conexao: responde erro estruturado e segue aguardando
+            try:
+                data = await websocket.receive_json()
+            except json.JSONDecodeError:
+                await websocket.send_json(
+                    {"type": "error", "message": "Invalid JSON payload"}
+                )
+                continue
+            if not isinstance(data, dict):
+                await websocket.send_json(
+                    {"type": "error", "message": "Payload must be a JSON object"}
+                )
+                continue
+
             user_message = data.get("message")
             if not user_message:
                 await websocket.send_json(
@@ -138,12 +153,12 @@ async def websocket_chat(
                 full_response += chunk
                 await websocket.send_json({"type": "chunk", "content": chunk})
 
-            await websocket.send_json({"type": "done"})
             latency_ms = int((time.time() - start_time) * 1000)
             turn_timer.record("t_llm_total", latency_ms)
 
-            # Persistencia fora do caminho critico: gravar depois do streaming
-            # nao atrasa o primeiro token. Ordem user -> assistant preservada.
+            # Persistencia fora do caminho critico do PRIMEIRO token: grava
+            # depois de todos os chunks, mas ANTES do "done" - se o cliente
+            # desconectar apos o done, nada se perde (llm_audit e obrigatorio).
             with turn_timer.measure("t_persist_user_msg"):
                 await chat_service.save_message(
                     db, conversation.id, "user", user_message
@@ -175,6 +190,8 @@ async def websocket_chat(
                     latency_ms=latency_ms,
                     chunks_used=chunks_used_audit,
                 )
+
+            await websocket.send_json({"type": "done"})
 
             turn_timer.log_summary(f"turno conversa={conversation.id}")
     except WebSocketDisconnect:
