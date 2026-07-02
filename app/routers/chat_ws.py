@@ -82,6 +82,9 @@ async def websocket_chat(
 
     setup_timer.log_summary(f"setup conexao user={user_id}")
 
+    # Provider resolvido uma vez por conexao (instancia cacheada no modulo)
+    provider = get_llm_provider()
+
     try:
         while True:
             data = await websocket.receive_json()
@@ -114,8 +117,6 @@ async def websocket_chat(
                 await chat_service.save_message(
                     db, conversation.id, "user", user_message
                 )
-
-            provider = get_llm_provider()
 
             start_time = time.time()
             first_token_at: float | None = None
