@@ -191,3 +191,53 @@ class TestChatFlow:
                 with pytest.raises(WebSocketDisconnect) as exc:
                     ws.receive_json()
                 assert exc.value.code == 4002
+
+
+class TestRagNoFluxoDoChat:
+    """Regressao do bug do RAG: chunk relevante DEVE entrar no prompt do LLM."""
+
+    async def _ingerir_chunk(self, db_session, content: str, source: str) -> None:
+        from tests.conftest import fake_encode
+        from app.models import KbChunk
+
+        db_session.add(
+            KbChunk(source=source, content=content, embedding=fake_encode(content))
+        )
+        await db_session.commit()
+
+    async def test_chunk_relevante_sempre_entra_no_prompt(
+        self, app_with_overrides, seed_consent, valid_token, fake_provider, db_session
+    ):
+        # Anti-bypass: havendo documento correspondente, o trecho tem que
+        # chegar ao LLM. Se o RAG for contornado, o prompt nao o conteria.
+        conteudo = "ordenha manual do leite humano com maos higienizadas"
+        await self._ingerir_chunk(db_session, conteudo, "ordenha_leite_humano")
+
+        with TestClient(app_with_overrides) as client:
+            with client.websocket_connect(f"/ws/chat?token={valid_token}") as ws:
+                ws.receive_json()
+                ws.send_json({"message": "ordenha manual do leite humano higienizadas"})
+                _collect_turn(ws)
+
+        system_prompt = fake_provider.calls[-1][0]["content"]
+        assert "CONTEXTO DOS PROTOCOLOS" in system_prompt
+        assert conteudo in system_prompt
+
+    async def test_sem_documento_correspondente_prompt_sem_contexto(
+        self, app_with_overrides, seed_consent, valid_token, fake_provider, db_session
+    ):
+        # Sem chunk relevante: EVA cai no modo conhecimento geral, sem secao
+        # de contexto e sem dizer "nao sei".
+        await self._ingerir_chunk(
+            db_session, "texto totalmente sem relacao xyz abcdef", "outro"
+        )
+
+        with TestClient(app_with_overrides) as client:
+            with client.websocket_connect(f"/ws/chat?token={valid_token}") as ws:
+                ws.receive_json()
+                ws.send_json({"message": "ordenha manual leite humano doacao"})
+                _collect_turn(ws)
+
+        system_prompt = fake_provider.calls[-1][0]["content"]
+        assert "CONTEXTO DOS PROTOCOLOS" not in system_prompt
+        assert "conhecimento geral confiavel" in system_prompt

@@ -2,6 +2,7 @@
 # Usa o banco de teste com vetores deterministicos (embeddings mockados).
 
 import pytest
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import KbChunk
@@ -71,3 +72,19 @@ async def test_respeita_top_k(db_session: AsyncSession):
         db_session, "ordenha manual do leite", top_k=3, min_score=0.0
     )
     assert len(results) == 3
+
+
+async def test_indice_de_busca_e_hnsw(db_session: AsyncSession):
+    # Paridade com producao: o banco de teste (create_all a partir do model)
+    # deve usar hnsw, nao ivfflat. O bug original passou despercebido porque
+    # o ivfflat degenerado nunca foi exercitado nesta suite.
+    row = (
+        await db_session.execute(
+            text(
+                "SELECT indexdef FROM pg_indexes "
+                "WHERE indexname = 'ix_kb_chunks_embedding'"
+            )
+        )
+    ).scalar_one()
+    assert "hnsw" in row.lower()
+    assert "vector_cosine_ops" in row.lower()
