@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import DateTime, Integer, String, func
+from sqlalchemy import Boolean, DateTime, Integer, String, func
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -29,6 +29,13 @@ class LlmAudit(Base):
     tokens_input: Mapped[int | None] = mapped_column(Integer, nullable=True)
     tokens_output: Mapped[int | None] = mapped_column(Integer, nullable=True)
     latency_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # Modo publico: registros anonimos nao tem user_id; a sessao e o IP
+    # (apenas hasheado, nunca em claro) sao a unica rastreabilidade LGPD.
+    is_anonymous: Mapped[bool] = mapped_column(
+        Boolean, server_default="false", nullable=False
+    )
+    session_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    ip_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         server_default=func.now(),
