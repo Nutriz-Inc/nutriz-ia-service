@@ -21,5 +21,17 @@ class Settings(BaseSettings):
     APP_ENV: str = "development"
     LOG_LEVEL: str = "INFO"
 
+    # Modo publico (chat anonimo sem login)
+    ANON_SESSION_TTL_MINUTES: int = 30
+    ANON_RATE_LIMIT_PER_IP_HOUR: int = 30
+    ANON_RATE_LIMIT_PER_SESSION: int = 10
+    ANON_MAX_JAILBREAK_STRIKES: int = 3
+    # Origens permitidas no CORS (front Vite roda em 5173). Lista separada por virgula.
+    CORS_ALLOW_ORIGINS: str = "http://localhost:5173,http://127.0.0.1:5173"
+
+    @property
+    def cors_origins_list(self) -> list[str]:
+        return [o.strip() for o in self.CORS_ALLOW_ORIGINS.split(",") if o.strip()]
+
 
 settings = Settings()
