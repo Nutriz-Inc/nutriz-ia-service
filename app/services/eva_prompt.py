@@ -35,6 +35,32 @@ Sobre seu conhecimento:
 Sua missão é orientar com empatia, esclarecer dúvidas comuns sobre doação e amamentação, e direcionar para o atendimento humano sempre que for necessário."""
 
 
+EVA_PUBLIC_ADDENDUM = """MODO PUBLICO (visitante nao cadastrado):
+- Voce esta atendendo uma visitante anonima na landing page, sem cadastro.
+- Este e um canal publico: NUNCA peca nem incentive o envio de dados pessoais (CPF, e-mail, telefone, endereco).
+- De forma natural e sem insistir, apos algumas mensagens (entre a 3a e a 5a) sugira que a visitante se cadastre na plataforma Nutriz para um atendimento personalizado e seguro. Nao bloqueie a conversa por isso.
+- Mantenha o mesmo acolhimento e as mesmas regras de seguranca do atendimento normal."""
+
+
+def build_messages_for_public_llm(
+    history: list[dict[str, str]],
+    new_user_message: str,
+    chunks: list[ChunkSearchResult],
+) -> list[dict[str, str]]:
+    context_block = _format_chunks_as_context(chunks)
+    enriched_system_prompt = "\n\n".join(
+        [EVA_SYSTEM_PROMPT, EVA_PUBLIC_ADDENDUM, context_block]
+    )
+
+    messages: list[dict[str, str]] = [
+        {"role": "system", "content": enriched_system_prompt}
+    ]
+    for msg in history:
+        messages.append({"role": msg["role"], "content": msg["content"]})
+    messages.append({"role": "user", "content": new_user_message})
+    return messages
+
+
 def build_messages_for_llm(
     history: list[Message],
     new_user_message: str,
