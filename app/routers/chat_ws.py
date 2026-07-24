@@ -22,7 +22,11 @@ from app.services.eva_prompt import (
     build_messages_for_public_llm,
 )
 from app.services.latency import PhaseTimer
-from app.services.profile_service import get_nutriz_profile
+from app.services.profile_service import (
+    STAFF_USER_TYPES,
+    get_nutriz_profile,
+    get_user_type,
+)
 from app.services.rag_service import search_chunks
 from app.services.rate_limiter import rate_limiter
 from app.services.session_service import decode_anonymous_session, hash_ip
@@ -58,6 +62,21 @@ async def websocket_chat(
     with setup_timer.measure("t_auth"):
         user_id = await authenticate_websocket(websocket, token)
     if user_id is None:
+        return
+
+    # Staff (adm/nurse) nao usa a EVA: recusa no backend, nao apenas na UI.
+    # Usuario sem linha na tabela user segue permitido (mesma postura do
+    # perfil: em dev o espelho pode nao ter o registro; o chat degrada sem
+    # personalizacao em vez de bloquear a nutriz).
+    with setup_timer.measure("t_role"):
+        user_type = await get_user_type(db, user_id)
+    if user_type in STAFF_USER_TYPES:
+        await websocket.send_json({
+            "type": "error",
+            "code": "staff_not_allowed",
+            "message": "A EVA atende apenas nutrizes. Perfis administrativos nao tem acesso ao chat.",
+        })
+        await websocket.close(code=4403, reason="Staff role not allowed")
         return
 
     with setup_timer.measure("t_consent"):

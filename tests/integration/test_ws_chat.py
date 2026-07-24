@@ -80,6 +80,67 @@ class TestAuthLgpd:
         assert count.scalar_one() == 0
 
 
+class TestStaffBloqueado:
+    # Staff (adm/nurse) nao usa a EVA: o backend recusa a conexao mesmo com
+    # token valido - o gate de UI no front nao e suficiente sozinho.
+    STAFF_IDS = {
+        "adm": "44444444-4444-4444-4444-444444444444",
+        "nurse": "55555555-5555-5555-5555-555555555555",
+    }
+
+    async def _seed_staff(self, db_session, user_type: str) -> str:
+        from datetime import datetime, timezone
+
+        staff_id = self.STAFF_IDS[user_type]
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
+        await db_session.execute(
+            text(
+                'INSERT INTO "user" (id_user, type, name, cpf, birth_date, '
+                "phone_number, email, password, created_at, created_by) VALUES "
+                "(:id, :type, 'Staff Teste', :cpf, :birth, :phone, :email, "
+                "'hash', :now, :id)"
+            ),
+            {
+                "id": staff_id,
+                "type": user_type,
+                "cpf": f"9999999990{1 if user_type == 'adm' else 2}",
+                "birth": now,
+                "phone": f"1198888000{1 if user_type == 'adm' else 2}",
+                "email": f"{user_type}@nutriz.com",
+                "now": now,
+            },
+        )
+        await db_session.commit()
+        return staff_id
+
+    @pytest.mark.parametrize("user_type", ["adm", "nurse"])
+    async def test_staff_recebe_erro_e_fecha_4403(
+        self, app_with_overrides, db_session, user_type
+    ):
+        staff_id = await self._seed_staff(db_session, user_type)
+        token = make_token(user_id=staff_id)
+        with TestClient(app_with_overrides) as client:
+            with client.websocket_connect(f"/ws/chat?token={token}") as ws:
+                event = ws.receive_json()
+                assert event["type"] == "error"
+                assert event["code"] == "staff_not_allowed"
+                with pytest.raises(WebSocketDisconnect) as exc:
+                    ws.receive_json()
+                assert exc.value.code == 4403
+
+        count = await db_session.execute(text("SELECT count(*) FROM conversations"))
+        assert count.scalar_one() == 0
+
+    def test_nutriz_common_segue_permitida(
+        self, app_with_overrides, seed_consent, valid_token
+    ):
+        # Garante que o bloqueio de staff nao afeta o papel common
+        with TestClient(app_with_overrides) as client:
+            with client.websocket_connect(f"/ws/chat?token={valid_token}") as ws:
+                event = ws.receive_json()
+                assert event["type"] == "conversation"
+
+
 class TestChatFlow:
     def test_mensagem_simples_recebe_chunks_e_done(
         self, app_with_overrides, seed_consent, valid_token, fake_provider: FakeProvider

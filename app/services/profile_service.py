@@ -14,6 +14,18 @@ from app.schemas.profile import AddressProfile, BabyProfile, NutrizProfile
 
 logger = logging.getLogger(__name__)
 
+# Papeis de staff Lactare: usam painel administrativo, nunca o chat da EVA.
+# O gate de UI no front nao basta - um token valido permitiria conectar
+# direto no WebSocket, entao o bloqueio precisa existir no backend.
+STAFF_USER_TYPES = frozenset({"adm", "nurse"})
+
+
+async def get_user_type(db: AsyncSession, id_user: str) -> str | None:
+    result = await db.execute(
+        select(User.type).where(User.id_user == id_user)
+    )
+    return result.scalar_one_or_none()
+
 
 def _describe_baby_age(age_in_days: int) -> str:
     if age_in_days < 7:
