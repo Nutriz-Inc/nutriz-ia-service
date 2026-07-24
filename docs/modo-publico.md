@@ -77,6 +77,10 @@ Emite um **session token** temporário (JWT). Sem autenticação prévia.
 | 4008   | limite de tentativas de jailbreak |
 | 4029   | rate limit (IP ou sessão)         |
 
+No chat **autenticado** (`/ws/chat`) valem ainda: **4001** (token ausente/inválido),
+**4002** (`conversation_id` inválido), **4003** (consent LGPD ausente) e **4403**
+(papel `adm`/`nurse` sem acesso à EVA — ver `docs/decisoes.md`).
+
 ## CORS
 
 O IA service habilita CORS para a origin do Vite (`http://localhost:5173`) via
