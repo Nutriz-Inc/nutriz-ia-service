@@ -170,11 +170,18 @@ async def websocket_chat(
                 query_embedding=query_embedding,
             )
 
+            # Acao contextual por regras (nunca pelo LLM). Detectada ANTES de
+            # montar o prompt: quando ha acao, a resposta deve ser curta e
+            # apontar para o botao. Nutriz logada nao e anonima: signup/login
+            # nunca disparam.
+            action = detect_action(user_message, is_anonymous=False)
+
             messages = build_messages_for_llm_with_rag(
                 history,
                 user_message,
                 rag_chunks,
                 profile=nutriz_profile,
+                action_label=action.label if action else None,
             )
 
             start_time = time.time()
@@ -213,10 +220,6 @@ async def websocket_chat(
                 }
                 for c in rag_chunks
             ]
-
-            # Acao contextual por regras (nunca pelo LLM). Nutriz logada: nao e
-            # anonima, entao signup nunca dispara.
-            action = detect_action(user_message, is_anonymous=False)
 
             with turn_timer.measure("t_persist_audit"):
                 await chat_service.save_llm_audit(
@@ -330,8 +333,13 @@ async def websocket_chat_public(
                 db, user_message, top_k=2, query_embedding=query_embedding
             )
 
+            # Acao contextual por regras, detectada antes do prompt: com acao, a
+            # resposta e curta e aponta para o botao. Modo anonimo: signup/login
+            # podem disparar.
+            action = detect_action(user_message, is_anonymous=True)
+
             messages = build_messages_for_public_llm(
-                history, user_message, rag_chunks
+                history, user_message, rag_chunks, action_label=action.label if action else None
             )
 
             start_time = time.time()
@@ -351,10 +359,6 @@ async def websocket_chat_public(
                 {"source": c.source, "score": c.score, "preview": c.content[:200]}
                 for c in rag_chunks
             ]
-
-            # Acao contextual por regras. Modo publico e anonimo: signup pode
-            # disparar aqui (nunca no chat autenticado).
-            action = detect_action(user_message, is_anonymous=True)
 
             # Auditoria LGPD tambem no modo publico: sem user_id, com
             # session_id e ip_hash. Sem persistir conversation/message.

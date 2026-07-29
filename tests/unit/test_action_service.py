@@ -17,6 +17,17 @@ class TestPositivos:
             == "signup"
         )
 
+    def test_login_anonimo(self):
+        action = detect_action("quero fazer login", is_anonymous=True)
+        assert action.slug == "login"
+        assert action.label == "Entrar"
+
+    def test_login_ja_tenho_conta(self):
+        assert (
+            detect_action("já tenho conta, quero entrar na minha conta", is_anonymous=True).slug
+            == "login"
+        )
+
     def test_whatsapp_falar_com_alguem(self):
         action = detect_action("queria falar com alguém", is_anonymous=True)
         assert action.slug == "whatsapp"
@@ -99,6 +110,9 @@ class TestSignupSomenteAnonimo:
     def test_signup_nao_dispara_para_logada(self):
         # Mesma frase que dispara signup no anonimo nao pode disparar na logada.
         assert detect_action("Como faço para me cadastrar?", is_anonymous=False) is None
+
+    def test_login_nao_dispara_para_logada(self):
+        assert detect_action("quero fazer login", is_anonymous=False) is None
 
     def test_outras_acoes_funcionam_para_logada(self):
         # O bloqueio e so do signup; whatsapp continua valendo para logada.

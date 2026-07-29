@@ -78,6 +78,20 @@ ACTION_RULES: list[_ActionRule] = [
         ),
     ),
     _ActionRule(
+        slug="login",
+        label="Entrar",
+        anonymous_only=True,
+        patterns=_compile(
+            [
+                r"\blogin\b",
+                r"\bentrar na (minha )?conta\b",
+                r"\bacessar (a )?(minha )?conta\b",
+                r"\bja tenho (uma )?conta\b",
+                r"\bja sou cadastrada\b",
+            ]
+        ),
+    ),
+    _ActionRule(
         slug="whatsapp",
         label="Falar no WhatsApp",
         patterns=_compile(
