@@ -95,6 +95,7 @@ async def save_llm_audit(
     is_anonymous: bool = False,
     session_id: str | None = None,
     ip_hash: str | None = None,
+    action_emitted: str | None = None,
 ) -> None:
     audit = LlmAudit(
         user_id=user_id,
@@ -110,6 +111,7 @@ async def save_llm_audit(
         is_anonymous=is_anonymous,
         session_id=session_id,
         ip_hash=ip_hash,
+        action_emitted=action_emitted,
     )
     db.add(audit)
     await db.commit()

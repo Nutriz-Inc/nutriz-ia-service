@@ -36,6 +36,9 @@ class LlmAudit(Base):
     )
     session_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
     ip_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    # Acao contextual determinISTICA enviada junto da resposta (signup,
+    # whatsapp, collection_points, articles) ou NULL. Serve para medir conversao.
+    action_emitted: Mapped[str | None] = mapped_column(String(30), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         server_default=func.now(),

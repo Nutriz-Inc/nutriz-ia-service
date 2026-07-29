@@ -35,6 +35,23 @@ def _collect_turn(ws) -> str:
             raise AssertionError(f"erro inesperado: {event}")
 
 
+def _collect_turn_with_action(ws):
+    """Le o turno ate 'done' e retorna (texto, frame_de_acao_ou_None)."""
+    response = ""
+    action = None
+    while True:
+        event = ws.receive_json()
+        etype = event["type"]
+        if etype == "chunk":
+            response += event["content"]
+        elif etype == "action":
+            action = event
+        elif etype == "done":
+            return response, action
+        elif etype == "error":
+            raise AssertionError(f"erro inesperado: {event}")
+
+
 class TestSessaoAnonima:
     def test_post_session_anonymous_retorna_token_anon(self, app_with_overrides):
         with TestClient(app_with_overrides) as client:
@@ -71,6 +88,55 @@ class TestAuthPublico:
                 with pytest.raises(WebSocketDisconnect) as exc:
                     ws.receive_json()
                 assert exc.value.code == 4001
+
+
+class TestFrameDeAcaoPublico:
+    def test_signup_emite_frame_antes_do_done(
+        self, app_with_overrides, anon_token, fake_provider: FakeProvider
+    ):
+        with TestClient(app_with_overrides) as client:
+            with client.websocket_connect(
+                f"/ws/chat-public?token={anon_token}"
+            ) as ws:
+                ws.receive_json()
+                ws.send_json({"message": "Como faço para me cadastrar?"})
+                _, action = _collect_turn_with_action(ws)
+
+        assert action is not None
+        assert action["action"] == "signup"
+        assert action["label"] == "Criar conta"
+
+    def test_pergunta_generica_nao_emite_frame(
+        self, app_with_overrides, anon_token, fake_provider: FakeProvider
+    ):
+        with TestClient(app_with_overrides) as client:
+            with client.websocket_connect(
+                f"/ws/chat-public?token={anon_token}"
+            ) as ws:
+                ws.receive_json()
+                ws.send_json({"message": "posso doar com bebe de 4 meses?"})
+                _, action = _collect_turn_with_action(ws)
+
+        assert action is None
+
+    async def test_action_emitted_registrado_no_audit(
+        self, app_with_overrides, anon_token, fake_provider, db_session
+    ):
+        with TestClient(app_with_overrides) as client:
+            with client.websocket_connect(
+                f"/ws/chat-public?token={anon_token}"
+            ) as ws:
+                ws.receive_json()
+                ws.send_json({"message": "onde posso doar perto de mim?"})
+                _collect_turn_with_action(ws)
+
+        row = await db_session.execute(
+            text(
+                "SELECT action_emitted FROM llm_audit WHERE is_anonymous = true "
+                "ORDER BY created_at DESC LIMIT 1"
+            )
+        )
+        assert row.scalar_one() == "collection_points"
 
 
 class TestChatPublicoFluxo:

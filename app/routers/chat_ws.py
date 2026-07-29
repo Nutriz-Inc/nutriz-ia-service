@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
 from app.llm.provider import get_llm_provider
 from app.services import chat_service, public_guard
+from app.services.action_service import detect_action
 from app.services.auth_ws import authenticate_websocket
 from app.services.consent_service import has_valid_consent
 from app.services.embeddings import embeddings_service
@@ -213,6 +214,10 @@ async def websocket_chat(
                 for c in rag_chunks
             ]
 
+            # Acao contextual por regras (nunca pelo LLM). Nutriz logada: nao e
+            # anonima, entao signup nunca dispara.
+            action = detect_action(user_message, is_anonymous=False)
+
             with turn_timer.measure("t_persist_audit"):
                 await chat_service.save_llm_audit(
                     db=db,
@@ -224,6 +229,12 @@ async def websocket_chat(
                     llm_model=provider.get_model_name(),
                     latency_ms=latency_ms,
                     chunks_used=chunks_used_audit,
+                    action_emitted=action.slug if action else None,
+                )
+
+            if action is not None:
+                await websocket.send_json(
+                    {"type": "action", "action": action.slug, "label": action.label}
                 )
 
             await websocket.send_json({"type": "done"})
@@ -341,6 +352,10 @@ async def websocket_chat_public(
                 for c in rag_chunks
             ]
 
+            # Acao contextual por regras. Modo publico e anonimo: signup pode
+            # disparar aqui (nunca no chat autenticado).
+            action = detect_action(user_message, is_anonymous=True)
+
             # Auditoria LGPD tambem no modo publico: sem user_id, com
             # session_id e ip_hash. Sem persistir conversation/message.
             await chat_service.save_llm_audit(
@@ -356,7 +371,13 @@ async def websocket_chat_public(
                 is_anonymous=True,
                 session_id=session_id,
                 ip_hash=ip_hash,
+                action_emitted=action.slug if action else None,
             )
+
+            if action is not None:
+                await websocket.send_json(
+                    {"type": "action", "action": action.slug, "label": action.label}
+                )
 
             await websocket.send_json({"type": "done"})
     except WebSocketDisconnect:

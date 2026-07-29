@@ -24,6 +24,23 @@ def _collect_turn(ws) -> str:
             raise AssertionError(f"erro inesperado: {event}")
 
 
+def _collect_turn_with_action(ws):
+    """Le o turno ate 'done' e retorna (texto, frame_de_acao_ou_None)."""
+    response = ""
+    action = None
+    while True:
+        event = ws.receive_json()
+        etype = event["type"]
+        if etype == "chunk":
+            response += event["content"]
+        elif etype == "action":
+            action = event
+        elif etype == "done":
+            return response, action
+        elif etype == "error":
+            raise AssertionError(f"erro inesperado: {event}")
+
+
 class TestAuthLgpd:
     def test_token_valido_com_consent_aceita_e_envia_conversa(
         self, app_with_overrides, seed_consent, valid_token
@@ -139,6 +156,45 @@ class TestStaffBloqueado:
             with client.websocket_connect(f"/ws/chat?token={valid_token}") as ws:
                 event = ws.receive_json()
                 assert event["type"] == "conversation"
+
+
+class TestFrameDeAcaoAutenticado:
+    def test_whatsapp_emite_frame(
+        self, app_with_overrides, seed_consent, valid_token, fake_provider: FakeProvider
+    ):
+        with TestClient(app_with_overrides) as client:
+            with client.websocket_connect(f"/ws/chat?token={valid_token}") as ws:
+                ws.receive_json()
+                ws.send_json({"message": "queria falar com alguem da equipe"})
+                _, action = _collect_turn_with_action(ws)
+
+        assert action is not None
+        assert action["action"] == "whatsapp"
+        assert action["label"] == "Falar no WhatsApp"
+
+    def test_signup_nao_dispara_para_nutriz_logada(
+        self, app_with_overrides, seed_consent, valid_token, fake_provider: FakeProvider
+    ):
+        # Mesma frase de signup, mas na conexao autenticada nao pode emitir
+        # signup - e nenhuma outra regra casa, entao nao ha frame de acao.
+        with TestClient(app_with_overrides) as client:
+            with client.websocket_connect(f"/ws/chat?token={valid_token}") as ws:
+                ws.receive_json()
+                ws.send_json({"message": "Como faço para me cadastrar?"})
+                _, action = _collect_turn_with_action(ws)
+
+        assert action is None
+
+    def test_pergunta_generica_nao_emite_frame(
+        self, app_with_overrides, seed_consent, valid_token, fake_provider: FakeProvider
+    ):
+        with TestClient(app_with_overrides) as client:
+            with client.websocket_connect(f"/ws/chat?token={valid_token}") as ws:
+                ws.receive_json()
+                ws.send_json({"message": "qual a temperatura ideal do leite?"})
+                _, action = _collect_turn_with_action(ws)
+
+        assert action is None
 
 
 class TestChatFlow:
