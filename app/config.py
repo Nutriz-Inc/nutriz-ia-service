@@ -33,5 +33,17 @@ class Settings(BaseSettings):
     def cors_origins_list(self) -> list[str]:
         return [o.strip() for o in self.CORS_ALLOW_ORIGINS.split(",") if o.strip()]
 
+    @property
+    def database_url(self) -> str:
+        # Provedores gerenciados (ex.: Render) entregam a URL como
+        # postgres:// ou postgresql://, mas o app usa o driver assincrono
+        # asyncpg. Normaliza o esquema para postgresql+asyncpg:// sem exigir
+        # que quem configura o ambiente saiba desse detalhe.
+        url = self.DATABASE_URL
+        for prefix in ("postgresql+asyncpg://", "postgresql://", "postgres://"):
+            if url.startswith(prefix):
+                return "postgresql+asyncpg://" + url[len(prefix) :]
+        return url
+
 
 settings = Settings()

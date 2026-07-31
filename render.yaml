@@ -1,0 +1,44 @@
+# Blueprint de deploy do nutriz-ia-service no Render.
+#
+# ATENCAO (senao a EVA da "sessao expirada" no modo logado):
+# JWT_SECRET DEVE ser IDENTICO ao AUTH_JWT_SECRET do backend Go em producao.
+# O IA service so valida o token; quem assina e o Go. Se os segredos diferem,
+# o token do login nao passa e a conexao fecha com 4001.
+#
+# Memoria: a EVA carrega torch + o modelo de embeddings (~470 MB) em RAM.
+# O plano free (512 MB) tende a estourar (OOM); use standard (2 GB) ou maior.
+
+services:
+  - type: web
+    name: nutriz-ia-service
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    plan: standard
+    healthCheckPath: /health
+    autoDeploy: false
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: nutriz-ia-db
+          property: connectionString
+      - key: JWT_SECRET
+        sync: false # cole o MESMO valor do AUTH_JWT_SECRET do backend Go
+      - key: JWT_ALGORITHM
+        value: HS256
+      - key: LLM_PROVIDER
+        value: groq
+      - key: GROQ_API_KEY
+        sync: false
+      - key: GROQ_MODEL
+        value: llama-3.3-70b-versatile
+      - key: CORS_ALLOW_ORIGINS
+        sync: false # origin do front publicado, ex.: https://nutriz-web.onrender.com
+      - key: APP_ENV
+        value: production
+      - key: LOG_LEVEL
+        value: INFO
+
+databases:
+  - name: nutriz-ia-db
+    plan: standard
+    postgresMajorVersion: "16"
