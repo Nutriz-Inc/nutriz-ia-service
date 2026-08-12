@@ -46,3 +46,5 @@ postgres_data/
 dist/
 build/
 *.egg-info/
+# Artefato de embeddings (grande). Regerar com scripts/export_model.py + prune_vocab.py
+/models/
