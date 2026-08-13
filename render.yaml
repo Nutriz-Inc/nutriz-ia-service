@@ -24,7 +24,7 @@ services:
         sync: false
       - key: OPENROUTER_API_KEY    # opcional (fallback quando Groq da 429)
         sync: false
-      - key: CORS_ALLOW_ORIGINS    # origem(ns) do front, ex.: https://app.nutriz.com
+      - key: CORS_ALLOW_ORIGINS    # front confirmado: https://web-nutriz.vercel.app
         sync: false
 
       # --- Configuracao fixa ---

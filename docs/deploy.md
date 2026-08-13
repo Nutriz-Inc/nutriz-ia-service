@@ -9,13 +9,17 @@ Render → **4)** ingestão → **5)** verificação.
 
 ---
 
-## 1. Artefato de embeddings (GitHub Release)
+## 1. Artefato de embeddings (GitHub Release privado + PAT)
 
-O `model.onnx` (~156 MB) **não vai no Git** (limite de 100 MB/arquivo do GitHub;
-está no `.gitignore`). O Dockerfile o baixa de um **GitHub Release** no build e
-confere o **SHA-256**. O `model.onnx` e o `tokenizer.json` são um **par**: se
-descasarem, os IDs viram lixo silencioso — publique/regenere sempre os dois
-juntos, sob a mesma tag.
+O `model.onnx` (~156 MB) **não vai no Git** (limite de 100 MB/arquivo; está no
+`.gitignore`). O Dockerfile o baixa de um **GitHub Release deste repositório
+privado** via **API de assets autenticada**, e confere o **SHA-256**. O
+`model.onnx` e o `tokenizer.json` são um **par**: se descasarem, os IDs viram
+lixo silencioso — publique/regenere sempre os dois juntos, sob a mesma tag.
+
+Como o repositório é privado (decisão do time — parceria Eurofarma, domínio de
+saúde), o download exige um token. Ele entra como **build secret** (mount),
+**nunca** como `ARG`: não fica em layer, no histórico da imagem nem no log.
 
 ### Tag e hashes atuais
 
@@ -25,27 +29,57 @@ juntos, sob a mesma tag.
 
 Esses hashes são o default dos `ARG MODEL_SHA256`/`TOKENIZER_SHA256` no Dockerfile.
 
-### Publicar o release (uma vez por versão do artefato)
+### PAT de leitura (fine-grained)
+
+Gerar em **GitHub → Settings → Developer settings → Personal access tokens →
+Fine-grained tokens → Generate new token**:
+
+- **Resource owner:** `Nutriz-Inc`
+- **Repository access:** *Only select repositories* → `nutriz-ia-service` (só este)
+- **Permissions → Repository → Contents: Read-only** (nada além disso)
+- **Expiration:** 90 dias (recomendado)
+
+Escopo mínimo: só lê o conteúdo/os assets deste repo, não escreve nada.
+
+**Nunca** cole o token em commit, log ou arquivo versionado. Onde usar:
+
+- **Local (validar o build):** salve o token num arquivo **fora do repo** (ou use
+  o `.gitignore`, que já cobre `gh_token*.txt`) e rode:
+  ```bash
+  DOCKER_BUILDKIT=1 docker build --secret id=gh_token,src=./gh_token.txt -t nutriz-ia-service:local .
+  ```
+- **Render:** cadastre um **Secret File** chamado `gh_token` com o token como
+  conteúdo (Dashboard → serviço → *Environment* → *Secret Files*). O BuildKit o
+  monta no build via `id=gh_token`. Não é uma env var — é Secret File.
+
+**Rotação:** antes de expirar, gere um novo fine-grained token com o mesmo
+escopo, atualize o Secret File `gh_token` no Render (e o arquivo local), redeploy
+e **revogue o antigo**. Nenhuma mudança de código é necessária.
+
+### Publicar / republicar o release
 
 Com o par já gerado em `models/` (ver "Regenerar" abaixo):
 
 ```bash
 gh release create embeddings-v1 \
   models/model.onnx models/tokenizer.json \
+  --repo Nutriz-Inc/nutriz-ia-service \
   --title "Embeddings podados v1" \
   --notes "paraphrase-multilingual-MiniLM-L12-v2, vocab podado 250k->50k (fp32 ONNX)."
 ```
 
-> Se regerar o artefato, use uma **tag nova** (`embeddings-v2`, ...) e atualize a
-> tag + os dois SHA-256 no Dockerfile (e aqui). Nunca reaproveite a tag com
-> conteúdo diferente.
+> Se regerar o artefato, use uma **tag nova** (`embeddings-v2`, ...), **não**
+> reaproveite a tag com conteúdo diferente. Ao trocar a tag, atualize no
+> Dockerfile: `ARG EMBEDDINGS_RELEASE` e os dois `ARG *_SHA256` (e os hashes
+> nesta seção). O `curl` casa o `Accept: application/octet-stream` na API de
+> assets; o `sha256sum -c` no build falha (e derruba o build) se o par não bater.
 
 ### Regenerar o par (fora do build do Docker)
 
 ```bash
 python scripts/export_model.py build              # fp32 ONNX + tokenizer (usa torch)
 python scripts/prune_vocab.py build models 50000  # poda -> models/model.onnx + tokenizer.json
-sha256sum models/model.onnx models/tokenizer.json # atualizar os hashes acima
+sha256sum models/model.onnx models/tokenizer.json # copiar os novos hashes para o Dockerfile e este doc
 ```
 
 ---
@@ -81,14 +115,20 @@ blueprint, ou crie um "Web Service" Docker manualmente com as mesmas variáveis.
 | `JWT_SECRET` | **Idêntica** à `AUTH_JWT_SECRET` do backend Go. |
 | `GROQ_API_KEY` | Chave do console.groq.com. |
 | `OPENROUTER_API_KEY` | Opcional — fallback quando a Groq retorna 429. |
-| `CORS_ALLOW_ORIGINS` | Origem(ns) do front, ex.: `https://app.nutriz.com` (lista separada por vírgula). |
+| `CORS_ALLOW_ORIGINS` | Origem(ns) do front. Confirmado: `https://web-nutriz.vercel.app` (lista separada por vírgula). |
 
 As demais (`LLM_PROVIDER`, `GROQ_MODEL`, `EMBEDDINGS_MODEL_DIR`,
 `RUN_MIGRATIONS=false`, `RUN_INGESTION=false`, `APP_ENV`, `LOG_LEVEL`, limites do
 modo público) já vêm fixas no `render.yaml`.
 
-> O build baixa o artefato do Release (passo 1) — a tag `embeddings-v1` precisa
-> existir antes do primeiro deploy.
+### Secret File do build (obrigatório)
+
+Além das env vars, cadastre um **Secret File** chamado **`gh_token`** com o PAT
+fine-grained (seção 1) como conteúdo. É o que autentica o download do artefato no
+build. Sem ele, o build falha ao baixar o `model.onnx`.
+
+> O build baixa o artefato do Release privado (passo 1) — a tag `embeddings-v1`
+> precisa existir e o Secret File `gh_token` estar cadastrado antes do 1º deploy.
 
 ---
 
