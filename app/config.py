@@ -17,8 +17,8 @@ class Settings(BaseSettings):
     OLLAMA_BASE_URL: str = "http://localhost:11434"
     GROQ_MODEL: str = "llama-3.3-70b-versatile"
     OLLAMA_MODEL: str = "llama3.2:3b"
-    # Diretorio com o modelo ONNX int8 embarcado (model.onnx + tokenizer.json).
-    # Gerado no build a partir do paraphrase-multilingual-MiniLM-L12-v2 fp32.
+    # Diretorio com o artefato ONNX de embeddings (model.onnx + tokenizer.json)
+    # de vocabulario podado (250k->50k tokens). Ver docs/otimizacao-memoria.md.
     EMBEDDINGS_MODEL_DIR: str = "/models"
     APP_ENV: str = "development"
     LOG_LEVEL: str = "INFO"
