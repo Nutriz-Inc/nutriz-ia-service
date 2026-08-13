@@ -9,6 +9,10 @@ services:
       # Dentro da rede do compose, o banco e o ollama tem hostname proprio
       DATABASE_URL: postgresql+asyncpg://postgres:postgres@db:5432/nutriz_ia
       OLLAMA_BASE_URL: http://ollama:11434
+      # Local: cria as tabelas e ingere os protocolos na subida (banco efemero
+      # do compose). No Render ambos ficam false (schema/ingestao manuais).
+      RUN_MIGRATIONS: "true"
+      RUN_INGESTION: "true"
     depends_on:
       db:
         condition: service_healthy
