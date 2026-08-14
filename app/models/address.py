@@ -27,6 +27,7 @@ class Address(Base):
     longitude: Mapped[Decimal | None] = mapped_column(Numeric(precision=10, scale=7), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
     updated_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
-    updated_by: Mapped[str | None] = mapped_column(String(36), nullable=True)
     removed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
-    removed_by: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    # Obs.: a tabela "address" do Go NAO tem updated_by/removed_by (diferente de
+    # "user", que tem). O ORM seleciona so as colunas mapeadas, entao declarar
+    # colunas inexistentes quebra a query em producao (UndefinedColumnError).
