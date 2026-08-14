@@ -11,6 +11,7 @@ from app.config import settings
 # (cada conexao de chat segura uma sessao durante todo o atendimento).
 engine = create_async_engine(
     settings.database_url,
+    connect_args=settings.db_connect_args,
     echo=False,
     future=True,
     pool_size=10,
