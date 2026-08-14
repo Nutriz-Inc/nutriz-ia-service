@@ -1,0 +1,56 @@
+# Blueprint do Render para o nutriz-ia-service (EVA).
+# Deploy via Docker. O artefato de embeddings e baixado no build a partir do
+# GitHub Release (ver Dockerfile e docs/deploy.md) - por isso o build precisa
+# de internet e o release da tag embeddings-v1 tem que existir antes.
+#
+# Variaveis com `sync: false` NAO ficam versionadas: sao coladas a mao no painel
+# do Render (Environment). As demais tem valor fixo aqui.
+services:
+  - type: web
+    name: nutriz-ia-service
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    plan: free
+    # Ajuste a branch que dispara auto-deploy conforme o fluxo do time.
+    branch: develop
+    healthCheckPath: /health
+    envVars:
+      # --- Secrets / especificos do ambiente (colar no painel) ---
+      - key: DATABASE_URL          # URL do Postgres de producao (Neon/Go)
+        sync: false
+      - key: JWT_SECRET            # identica a AUTH_JWT_SECRET do backend Go
+        sync: false
+      - key: GROQ_API_KEY          # console.groq.com
+        sync: false
+      - key: OPENROUTER_API_KEY    # opcional (fallback quando Groq da 429)
+        sync: false
+      - key: CORS_ALLOW_ORIGINS    # front confirmado: https://web-nutriz.vercel.app
+        sync: false
+
+      # --- Configuracao fixa ---
+      - key: LLM_PROVIDER
+        value: groq
+      - key: GROQ_MODEL
+        value: llama-3.3-70b-versatile
+      - key: JWT_ALGORITHM
+        value: HS256
+      - key: EMBEDDINGS_MODEL_DIR
+        value: /models
+      # Schema e ingestao sao gerenciados manualmente (docs/migracao-neon.sql +
+      # carga one-off). O servico NAO mexe no banco do Go na subida.
+      - key: RUN_MIGRATIONS
+        value: "false"
+      - key: RUN_INGESTION
+        value: "false"
+      - key: APP_ENV
+        value: production
+      - key: LOG_LEVEL
+        value: INFO
+      - key: ANON_SESSION_TTL_MINUTES
+        value: "30"
+      - key: ANON_RATE_LIMIT_PER_IP_HOUR
+        value: "30"
+      - key: ANON_RATE_LIMIT_PER_SESSION
+        value: "10"
+      - key: ANON_MAX_JAILBREAK_STRIKES
+        value: "3"

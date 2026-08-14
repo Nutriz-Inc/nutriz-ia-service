@@ -1,0 +1,44 @@
+# CI: roda a suite completa offline contra a mesma imagem pgvector do compose.
+name: testes
+
+on:
+  pull_request:
+  push:
+    branches: [develop, main]
+
+jobs:
+  pytest:
+    runs-on: ubuntu-latest
+
+    services:
+      db:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: nutriz_ia
+        ports:
+          - "5433:5432"
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      # torch cpu-only antes do requirements (mesma razao do Dockerfile)
+      - name: Instala torch cpu-only
+        run: pip install torch==2.12.0+cpu --index-url https://download.pytorch.org/whl/cpu
+
+      - name: Instala dependencias
+        run: pip install -r requirements-dev.txt
+
+      - name: Roda a suite
+        run: pytest -v --cov=app/services --cov=app/llm --cov-report=term

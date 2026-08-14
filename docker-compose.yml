@@ -1,0 +1,60 @@
+services:
+  app:
+    build: .
+    container_name: nutriz-ia-app
+    ports:
+      - "8000:8000"
+    env_file: .env
+    environment:
+      # Dentro da rede do compose, o banco e o ollama tem hostname proprio
+      DATABASE_URL: postgresql+asyncpg://postgres:postgres@db:5432/nutriz_ia
+      OLLAMA_BASE_URL: http://ollama:11434
+      # Local: cria as tabelas e ingere os protocolos na subida (banco efemero
+      # do compose). No Render ambos ficam false (schema/ingestao manuais).
+      RUN_MIGRATIONS: "true"
+      RUN_INGESTION: "true"
+    depends_on:
+      db:
+        condition: service_healthy
+    # Sem volume de cache: o modelo ONNX ja vem embarcado na imagem (usado
+    # offline). Espelha o Render free, que nao tem disco persistente.
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=3)"]
+      interval: 15s
+      timeout: 5s
+      retries: 20
+      # Modelo embarcado e usado offline: boot rapido, mas deixamos folga
+      # para a migration + ingestao inicial.
+      start_period: 90s
+
+  db:
+    image: pgvector/pgvector:pg16
+    container_name: nutriz-ia-db
+    ports:
+      - "5433:5432"
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: nutriz_ia
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d nutriz_ia"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  ollama:
+    image: ollama/ollama:latest
+    container_name: nutriz-ia-ollama
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  ollama_data:

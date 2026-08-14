@@ -1,5 +1,6 @@
 # Documentação interna privada (não compartilhar no repositório)
 CLAUDE.md
+.claude
 
 # Python
 __pycache__/
@@ -28,14 +29,26 @@ Thumbs.db
 logs/
 *.log
 
+# Testes
+.pytest_cache/
+.coverage
+htmlcov/
+skills-lock.json
+
 # Postgres data (volume do docker)
 postgres_data/
 
-# Modelos baixados (sentence-transformers cache)
+# Cache de modelos baixados (sentence-transformers, Hugging Face)
 .cache/
-models/
+.models_cache/
 
 # Build / distribution
 dist/
 build/
 *.egg-info/
+# Artefato de embeddings (grande). Regerar com scripts/export_model.py + prune_vocab.py
+/models/
+
+# PAT do GitHub usado como build secret local (NUNCA versionar). Ver docs/deploy.md
+gh_token*.txt
+gh_token
