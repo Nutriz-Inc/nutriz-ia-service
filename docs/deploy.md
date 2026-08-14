@@ -111,7 +111,7 @@ blueprint, ou crie um "Web Service" Docker manualmente com as mesmas variáveis.
 
 | Variável | O que é |
 |---|---|
-| `DATABASE_URL` | URL do Postgres de produção. Aceita `postgres://`/`postgresql://` (o app normaliza para asyncpg). |
+| `DATABASE_URL` | URL do Postgres de produção — **cole a string original do Neon como está** (vem com `?sslmode=require`). O app normaliza sozinho: converte o esquema para asyncpg, **remove o `sslmode`** e afins (sintaxe libpq/psycopg que o asyncpg rejeita com `TypeError`) e ativa o **SSL via `connect_args`** quando o `sslmode` exige. Não precisa editar a URL nem usar contorno. |
 | `JWT_SECRET` | **Idêntica** à `AUTH_JWT_SECRET` do backend Go. |
 | `GROQ_API_KEY` | Chave do console.groq.com. |
 | `OPENROUTER_API_KEY` | Opcional — fallback quando a Groq retorna 429. |
