@@ -115,6 +115,30 @@ def test_perfil_degradado_sem_bebe_e_endereco():
     assert "Localizacao: nao cadastrada" in system
 
 
+def test_nome_do_bebe_entra_no_contexto():
+    # Bug de producao: bebe cadastrado COM nome chegava a EVA so com a idade.
+    messages = build_messages_for_llm_with_rag([], "oi", [], profile=_profile())
+    system = messages[0]["content"]
+    assert "Bebe: Joao, 4 meses" in system
+
+
+def test_bebe_sem_nome_usa_so_a_idade():
+    baby = BabyProfile(
+        id_user_baby="b1",
+        name=None,
+        birth_date=datetime(2026, 3, 1),
+        age_in_days=120,
+        age_description="4 meses - leite maduro, fase ideal de doacao",
+    )
+    profile = NutrizProfile(
+        id_user="u1", name="Usuaria Teste", baby=baby, address=None
+    )
+    messages = build_messages_for_llm_with_rag([], "oi", [], profile=profile)
+    system = messages[0]["content"]
+    assert "Bebe: 4 meses" in system
+    assert "Joao" not in system
+
+
 def test_chunk_longo_e_truncado_no_prompt():
     palavras = " ".join(f"palavra{i}" for i in range(MAX_CHUNK_WORDS + 100))
     messages = build_messages_for_llm_with_rag([], "oi", [_chunk(content=palavras)])
