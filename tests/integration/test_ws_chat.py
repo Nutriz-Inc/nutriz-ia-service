@@ -24,6 +24,23 @@ def _collect_turn(ws) -> str:
             raise AssertionError(f"erro inesperado: {event}")
 
 
+def _collect_turn_with_action(ws):
+    """Le o turno ate 'done' e retorna (texto, frame_de_acao_ou_None)."""
+    response = ""
+    action = None
+    while True:
+        event = ws.receive_json()
+        etype = event["type"]
+        if etype == "chunk":
+            response += event["content"]
+        elif etype == "action":
+            action = event
+        elif etype == "done":
+            return response, action
+        elif etype == "error":
+            raise AssertionError(f"erro inesperado: {event}")
+
+
 class TestAuthLgpd:
     def test_token_valido_com_consent_aceita_e_envia_conversa(
         self, app_with_overrides, seed_consent, valid_token
@@ -78,6 +95,106 @@ class TestAuthLgpd:
 
         count = await db_session.execute(text("SELECT count(*) FROM conversations"))
         assert count.scalar_one() == 0
+
+
+class TestStaffBloqueado:
+    # Staff (adm/nurse) nao usa a EVA: o backend recusa a conexao mesmo com
+    # token valido - o gate de UI no front nao e suficiente sozinho.
+    STAFF_IDS = {
+        "adm": "44444444-4444-4444-4444-444444444444",
+        "nurse": "55555555-5555-5555-5555-555555555555",
+    }
+
+    async def _seed_staff(self, db_session, user_type: str) -> str:
+        from datetime import datetime, timezone
+
+        staff_id = self.STAFF_IDS[user_type]
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
+        await db_session.execute(
+            text(
+                'INSERT INTO "user" (id_user, type, name, cpf, birth_date, '
+                "phone_number, email, password, created_at, created_by) VALUES "
+                "(:id, :type, 'Staff Teste', :cpf, :birth, :phone, :email, "
+                "'hash', :now, :id)"
+            ),
+            {
+                "id": staff_id,
+                "type": user_type,
+                "cpf": f"9999999990{1 if user_type == 'adm' else 2}",
+                "birth": now,
+                "phone": f"1198888000{1 if user_type == 'adm' else 2}",
+                "email": f"{user_type}@nutriz.com",
+                "now": now,
+            },
+        )
+        await db_session.commit()
+        return staff_id
+
+    @pytest.mark.parametrize("user_type", ["adm", "nurse"])
+    async def test_staff_recebe_erro_e_fecha_4403(
+        self, app_with_overrides, db_session, user_type
+    ):
+        staff_id = await self._seed_staff(db_session, user_type)
+        token = make_token(user_id=staff_id)
+        with TestClient(app_with_overrides) as client:
+            with client.websocket_connect(f"/ws/chat?token={token}") as ws:
+                event = ws.receive_json()
+                assert event["type"] == "error"
+                assert event["code"] == "staff_not_allowed"
+                with pytest.raises(WebSocketDisconnect) as exc:
+                    ws.receive_json()
+                assert exc.value.code == 4403
+
+        count = await db_session.execute(text("SELECT count(*) FROM conversations"))
+        assert count.scalar_one() == 0
+
+    def test_nutriz_common_segue_permitida(
+        self, app_with_overrides, seed_consent, valid_token
+    ):
+        # Garante que o bloqueio de staff nao afeta o papel common
+        with TestClient(app_with_overrides) as client:
+            with client.websocket_connect(f"/ws/chat?token={valid_token}") as ws:
+                event = ws.receive_json()
+                assert event["type"] == "conversation"
+
+
+class TestFrameDeAcaoAutenticado:
+    def test_whatsapp_emite_frame(
+        self, app_with_overrides, seed_consent, valid_token, fake_provider: FakeProvider
+    ):
+        with TestClient(app_with_overrides) as client:
+            with client.websocket_connect(f"/ws/chat?token={valid_token}") as ws:
+                ws.receive_json()
+                ws.send_json({"message": "queria falar com alguem da equipe"})
+                _, action = _collect_turn_with_action(ws)
+
+        assert action is not None
+        assert action["action"] == "whatsapp"
+        assert action["label"] == "Falar no WhatsApp"
+
+    def test_signup_nao_dispara_para_nutriz_logada(
+        self, app_with_overrides, seed_consent, valid_token, fake_provider: FakeProvider
+    ):
+        # Mesma frase de signup, mas na conexao autenticada nao pode emitir
+        # signup - e nenhuma outra regra casa, entao nao ha frame de acao.
+        with TestClient(app_with_overrides) as client:
+            with client.websocket_connect(f"/ws/chat?token={valid_token}") as ws:
+                ws.receive_json()
+                ws.send_json({"message": "Como faço para me cadastrar?"})
+                _, action = _collect_turn_with_action(ws)
+
+        assert action is None
+
+    def test_pergunta_generica_nao_emite_frame(
+        self, app_with_overrides, seed_consent, valid_token, fake_provider: FakeProvider
+    ):
+        with TestClient(app_with_overrides) as client:
+            with client.websocket_connect(f"/ws/chat?token={valid_token}") as ws:
+                ws.receive_json()
+                ws.send_json({"message": "qual a temperatura ideal do leite?"})
+                _, action = _collect_turn_with_action(ws)
+
+        assert action is None
 
 
 class TestChatFlow:
@@ -191,3 +308,53 @@ class TestChatFlow:
                 with pytest.raises(WebSocketDisconnect) as exc:
                     ws.receive_json()
                 assert exc.value.code == 4002
+
+
+class TestRagNoFluxoDoChat:
+    """Regressao do bug do RAG: chunk relevante DEVE entrar no prompt do LLM."""
+
+    async def _ingerir_chunk(self, db_session, content: str, source: str) -> None:
+        from tests.conftest import fake_encode
+        from app.models import KbChunk
+
+        db_session.add(
+            KbChunk(source=source, content=content, embedding=fake_encode(content))
+        )
+        await db_session.commit()
+
+    async def test_chunk_relevante_sempre_entra_no_prompt(
+        self, app_with_overrides, seed_consent, valid_token, fake_provider, db_session
+    ):
+        # Anti-bypass: havendo documento correspondente, o trecho tem que
+        # chegar ao LLM. Se o RAG for contornado, o prompt nao o conteria.
+        conteudo = "ordenha manual do leite humano com maos higienizadas"
+        await self._ingerir_chunk(db_session, conteudo, "ordenha_leite_humano")
+
+        with TestClient(app_with_overrides) as client:
+            with client.websocket_connect(f"/ws/chat?token={valid_token}") as ws:
+                ws.receive_json()
+                ws.send_json({"message": "ordenha manual do leite humano higienizadas"})
+                _collect_turn(ws)
+
+        system_prompt = fake_provider.calls[-1][0]["content"]
+        assert "CONTEXTO DOS PROTOCOLOS" in system_prompt
+        assert conteudo in system_prompt
+
+    async def test_sem_documento_correspondente_prompt_sem_contexto(
+        self, app_with_overrides, seed_consent, valid_token, fake_provider, db_session
+    ):
+        # Sem chunk relevante: EVA cai no modo conhecimento geral, sem secao
+        # de contexto e sem dizer "nao sei".
+        await self._ingerir_chunk(
+            db_session, "texto totalmente sem relacao xyz abcdef", "outro"
+        )
+
+        with TestClient(app_with_overrides) as client:
+            with client.websocket_connect(f"/ws/chat?token={valid_token}") as ws:
+                ws.receive_json()
+                ws.send_json({"message": "ordenha manual leite humano doacao"})
+                _collect_turn(ws)
+
+        system_prompt = fake_provider.calls[-1][0]["content"]
+        assert "CONTEXTO DOS PROTOCOLOS" not in system_prompt
+        assert "conhecimento geral confiavel" in system_prompt

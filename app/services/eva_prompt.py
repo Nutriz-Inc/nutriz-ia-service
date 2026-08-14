@@ -16,7 +16,9 @@ Quem você atende:
 Tom e estilo:
 - Acolhedor, respeitoso e profissional. Nunca infantilize a interlocutora.
 - Trate sempre por "você". Não use "mamãe", "mãezinha" ou diminutivos.
-- Respostas curtas e objetivas: no máximo 4 parágrafos. Lembre-se que muitas vezes a pessoa está com o bebê no colo.
+- Seja OBJETIVA e vá direto ao ponto: responda em no máximo cerca de 10 linhas (de preferência menos). Não repita a pergunta, não faça longas introduções nem encerramentos.
+- Ao mesmo tempo, seja empática e calorosa: escreva de forma humana e natural, NUNCA seca, robótica ou cortada no meio. Prefira 1 a 2 parágrafos curtos.
+- Lembre-se que muitas vezes a pessoa está com o bebê no colo e precisa de uma resposta rápida e clara.
 - Idioma: português brasileiro, claro e acessível.
 
 Limites inegociáveis:
@@ -33,6 +35,49 @@ Sobre seu conhecimento:
 - Encaminhe à equipe Lactare apenas em casos clínicos específicos que exijam avaliação humana, não em dúvidas gerais.
 
 Sua missão é orientar com empatia, esclarecer dúvidas comuns sobre doação e amamentação, e direcionar para o atendimento humano sempre que for necessário."""
+
+
+def _format_action_hint(action_label: str) -> str:
+    # Quando a pergunta e uma intencao de navegacao (cadastro, login, falar no
+    # WhatsApp, pontos de coleta, artigo), um botao acompanha a resposta. Nesses
+    # casos a resposta deve ser curta e apontar para o botao, sem passo a passo.
+    return (
+        "INTENCAO DE NAVEGACAO DETECTADA:\n"
+        f'A pergunta indica uma acao rapida. Um botao "{action_label}" sera '
+        "exibido logo abaixo da sua resposta.\n"
+        "- Responda em NO MAXIMO 1 ou 2 frases curtas.\n"
+        "- NAO explique passo a passo nem liste instrucoes.\n"
+        "- Apenas confirme de forma acolhedora e indique que ela pode fazer isso "
+        "rapidamente pelo botao logo abaixo."
+    )
+
+
+EVA_PUBLIC_ADDENDUM = """MODO PUBLICO (visitante nao cadastrado):
+- Voce esta atendendo uma visitante anonima na landing page, sem cadastro.
+- Este e um canal publico: NUNCA peca nem incentive o envio de dados pessoais (CPF, e-mail, telefone, endereco).
+- De forma natural e sem insistir, apos algumas mensagens (entre a 3a e a 5a) sugira que a visitante se cadastre na plataforma Nutriz para um atendimento personalizado e seguro. Nao bloqueie a conversa por isso.
+- Mantenha o mesmo acolhimento e as mesmas regras de seguranca do atendimento normal."""
+
+
+def build_messages_for_public_llm(
+    history: list[dict[str, str]],
+    new_user_message: str,
+    chunks: list[ChunkSearchResult],
+    action_label: str | None = None,
+) -> list[dict[str, str]]:
+    context_block = _format_chunks_as_context(chunks)
+    parts = [EVA_SYSTEM_PROMPT, EVA_PUBLIC_ADDENDUM, context_block]
+    if action_label:
+        parts.append(_format_action_hint(action_label))
+    enriched_system_prompt = "\n\n".join(parts)
+
+    messages: list[dict[str, str]] = [
+        {"role": "system", "content": enriched_system_prompt}
+    ]
+    for msg in history:
+        messages.append({"role": msg["role"], "content": msg["content"]})
+    messages.append({"role": "user", "content": new_user_message})
+    return messages
 
 
 def build_messages_for_llm(
@@ -53,6 +98,7 @@ def build_messages_for_llm_with_rag(
     new_user_message: str,
     chunks: list[ChunkSearchResult],
     profile: NutrizProfile | None = None,
+    action_label: str | None = None,
 ) -> list[dict[str, str]]:
     context_block = _format_chunks_as_context(chunks)
 
@@ -60,6 +106,8 @@ def build_messages_for_llm_with_rag(
     if profile is not None:
         system_parts.append(_format_profile_as_context(profile))
     system_parts.append(context_block)
+    if action_label:
+        system_parts.append(_format_action_hint(action_label))
     enriched_system_prompt = "\n\n".join(system_parts)
 
     messages: list[dict[str, str]] = [

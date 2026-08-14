@@ -10,7 +10,7 @@ from app.config import settings
 # pool_size/max_overflow dimensionados para conexoes WebSocket longas
 # (cada conexao de chat segura uma sessao durante todo o atendimento).
 engine = create_async_engine(
-    settings.DATABASE_URL,
+    settings.database_url,
     echo=False,
     future=True,
     pool_size=10,

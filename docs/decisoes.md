@@ -37,3 +37,17 @@ Registro curto de decisões: contexto → decisão → consequência.
 - **Contexto**: os testes de integração precisam de Postgres com pgvector real (busca vetorial não funciona em SQLite) sem poluir o banco de desenvolvimento.
 - **Decisão**: a suíte cria/destrói `nutriz_ia_test` na mesma instância do compose, com `TRUNCATE` entre testes e `pg_terminate_backend` para derrubar conexões órfãs do TestClient.
 - **Consequência**: testes offline e determinísticos; exigem apenas `docker compose up -d db`. CI usa a mesma imagem `pgvector/pgvector:pg16`.
+
+## 2026-07-24 — Bloqueio de `adm`/`nurse` no `/ws/chat` (close 4403)
+
+A EVA atende apenas nutrizes (`common`). O gate existia só no frontend (o FAB
+não é montado para staff), mas isso não protege o WebSocket: um token válido de
+`adm`/`nurse` conectaria direto em `/ws/chat`.
+
+O router passa a consultar `user.type` logo após a autenticação (antes da
+checagem de consent) e recusa perfis de staff com frame `staff_not_allowed` +
+close **4403**. Usuário sem linha na tabela espelhada segue permitido — mesma
+postura já adotada para o perfil: o chat degrada sem personalização em vez de
+bloquear a nutriz, já que em dev o espelho pode não ter o registro.
+
+Custo: uma query a mais por conexão (não por turno), medida como `t_role`.

@@ -46,3 +46,9 @@ postgres_data/
 dist/
 build/
 *.egg-info/
+# Artefato de embeddings (grande). Regerar com scripts/export_model.py + prune_vocab.py
+/models/
+
+# PAT do GitHub usado como build secret local (NUNCA versionar). Ver docs/deploy.md
+gh_token*.txt
+gh_token

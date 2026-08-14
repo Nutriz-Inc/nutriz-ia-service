@@ -9,20 +9,24 @@ services:
       # Dentro da rede do compose, o banco e o ollama tem hostname proprio
       DATABASE_URL: postgresql+asyncpg://postgres:postgres@db:5432/nutriz_ia
       OLLAMA_BASE_URL: http://ollama:11434
+      # Local: cria as tabelas e ingere os protocolos na subida (banco efemero
+      # do compose). No Render ambos ficam false (schema/ingestao manuais).
+      RUN_MIGRATIONS: "true"
+      RUN_INGESTION: "true"
     depends_on:
       db:
         condition: service_healthy
-    volumes:
-      # Cache do modelo de embeddings (~470MB): baixa 1x, sobrevive a rebuilds
-      - models_cache:/models-cache
+    # Sem volume de cache: o modelo ONNX ja vem embarcado na imagem (usado
+    # offline). Espelha o Render free, que nao tem disco persistente.
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=3)"]
       interval: 15s
       timeout: 5s
       retries: 20
-      # 1a subida baixa o modelo de embeddings e roda warm-up
-      start_period: 300s
+      # Modelo embarcado e usado offline: boot rapido, mas deixamos folga
+      # para a migration + ingestao inicial.
+      start_period: 90s
 
   db:
     image: pgvector/pgvector:pg16
@@ -54,4 +58,3 @@ services:
 volumes:
   postgres_data:
   ollama_data:
-  models_cache:

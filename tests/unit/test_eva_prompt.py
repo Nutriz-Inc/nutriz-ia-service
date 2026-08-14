@@ -77,6 +77,21 @@ def test_sem_chunks_prompt_instrui_conhecimento_geral():
     assert "CONTEXTO DOS PROTOCOLOS" not in system
 
 
+def test_com_action_label_prompt_instrui_resposta_curta():
+    messages = build_messages_for_llm_with_rag(
+        [], "como me cadastrar?", [], action_label="Criar conta"
+    )
+    system = messages[0]["content"]
+    assert "INTENCAO DE NAVEGACAO DETECTADA" in system
+    assert '"Criar conta"' in system
+    assert "NO MAXIMO 1 ou 2 frases" in system
+
+
+def test_sem_action_label_prompt_nao_tem_instrucao_de_botao():
+    messages = build_messages_for_llm_with_rag([], "como ordenhar?", [])
+    assert "INTENCAO DE NAVEGACAO DETECTADA" not in messages[0]["content"]
+
+
 def test_com_perfil_completo_contexto_formatado():
     messages = build_messages_for_llm_with_rag([], "oi", [], profile=_profile())
     system = messages[0]["content"]

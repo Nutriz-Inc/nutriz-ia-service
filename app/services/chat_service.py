@@ -82,8 +82,8 @@ async def get_recent_messages(
 
 async def save_llm_audit(
     db: AsyncSession,
-    user_id: str,
-    conversation_id: UUID,
+    user_id: str | None,
+    conversation_id: UUID | None,
     message_id: UUID | None,
     prompt_full: list[dict[str, str]],
     llm_provider: str,
@@ -92,6 +92,10 @@ async def save_llm_audit(
     tokens_output: int | None = None,
     latency_ms: int | None = None,
     chunks_used: list[dict[str, Any]] | None = None,
+    is_anonymous: bool = False,
+    session_id: str | None = None,
+    ip_hash: str | None = None,
+    action_emitted: str | None = None,
 ) -> None:
     audit = LlmAudit(
         user_id=user_id,
@@ -104,6 +108,10 @@ async def save_llm_audit(
         tokens_input=tokens_input,
         tokens_output=tokens_output,
         latency_ms=latency_ms,
+        is_anonymous=is_anonymous,
+        session_id=session_id,
+        ip_hash=ip_hash,
+        action_emitted=action_emitted,
     )
     db.add(audit)
     await db.commit()

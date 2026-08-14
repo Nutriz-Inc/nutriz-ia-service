@@ -3,7 +3,7 @@ from datetime import datetime
 from typing import Any
 
 from pgvector.sqlalchemy import Vector
-from sqlalchemy import DateTime, String, Text, func
+from sqlalchemy import DateTime, Index, String, Text, func
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -12,6 +12,19 @@ from app.database import Base
 
 class KbChunk(Base):
     __tablename__ = "kb_chunks"
+
+    # Indice declarado no model para que o banco de teste (create_all) use a
+    # mesma estrutura de busca da producao (migration) — o bug do ivfflat
+    # degenerado nao aparecia nos testes justamente por essa divergencia
+    __table_args__ = (
+        Index(
+            "ix_kb_chunks_embedding",
+            "embedding",
+            postgresql_using="hnsw",
+            postgresql_with={"m": 16, "ef_construction": 64},
+            postgresql_ops={"embedding": "vector_cosine_ops"},
+        ),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
