@@ -171,7 +171,15 @@ def _format_profile_as_context(profile: NutrizProfile) -> str:
     parts.append(f"- Nome: {profile.name}")
 
     if profile.baby is not None:
-        parts.append(f"- Bebe: {profile.baby.age_description}")
+        # O nome do bebe e opcional (nullable no banco). Quando existe, entra no
+        # contexto para a EVA poder se referir a ele; sem isso a nutriz recebia
+        # so a idade mesmo tendo cadastrado o nome.
+        if profile.baby.name:
+            parts.append(
+                f"- Bebe: {profile.baby.name}, {profile.baby.age_description}"
+            )
+        else:
+            parts.append(f"- Bebe: {profile.baby.age_description}")
     else:
         parts.append("- Bebe: nao cadastrado")
 
@@ -186,7 +194,7 @@ def _format_profile_as_context(profile: NutrizProfile) -> str:
     parts.append("")
     parts.append("INSTRUCOES DE USO DO PERFIL:")
     parts.append(
-        "- Personalize a resposta com base no perfil quando relevante (idade do bebe, localizacao)"
+        "- Personalize a resposta com base no perfil quando relevante (nome e idade do bebe, localizacao)"
     )
     parts.append(
         "- Trate a nutriz pelo primeiro nome quando apropriado, sem repetir em toda mensagem"
