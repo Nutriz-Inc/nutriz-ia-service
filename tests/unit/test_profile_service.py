@@ -1,5 +1,7 @@
 # Testes do servico de perfil consolidado (user + user_baby + address).
 
+from unittest.mock import AsyncMock
+
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.services.profile_service import _describe_baby_age, get_nutriz_profile
@@ -42,3 +44,17 @@ def test_descricao_de_idade_do_bebe_por_faixa():
     assert "fase ideal de doacao" in _describe_baby_age(120)
     assert "atencao aos criterios" in _describe_baby_age(200)
     assert "amamentacao prolongada" in _describe_baby_age(400)
+
+
+async def test_falha_na_leitura_do_perfil_degrada_sem_derrubar():
+    # Qualquer erro ao ler o perfil (ex.: coluna inexistente no schema real do
+    # Go, banco indisponivel) deve degradar para None + rollback da sessao, nunca
+    # propagar e derrubar o chat. O rollback evita deixar a sessao em transacao
+    # abortada, o que faria as queries seguintes do turno tambem falharem.
+    db = AsyncMock(spec=AsyncSession)
+    db.execute.side_effect = Exception("column address.updated_by does not exist")
+
+    profile = await get_nutriz_profile(db, "f058115f-51cb-4eb6-b7b9-7e2397299641")
+
+    assert profile is None
+    db.rollback.assert_awaited_once()
