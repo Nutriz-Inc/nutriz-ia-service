@@ -17,6 +17,7 @@ from app.services import chat_service, public_guard
 from app.services.action_service import detect_action
 from app.services.auth_ws import authenticate_websocket
 from app.services.consent_service import has_valid_consent
+from app.services.donation_context_service import get_donation_context
 from app.services.embeddings import embeddings_service
 from app.services.eva_prompt import (
     build_messages_for_llm_with_rag,
@@ -114,10 +115,33 @@ async def websocket_chat(
         {"type": "conversation", "conversation_id": str(conversation.id)}
     )
 
+    # Do ponto em diante o turno usa SO este valor puro, nunca mais o objeto
+    # ORM. Motivo: as leituras opcionais abaixo (perfil, doacoes) degradam com
+    # rollback, e o rollback EXPIRA todos os objetos da sessao - tocar em
+    # conversation.id depois disso dispara um refresh sincrono que estoura
+    # MissingGreenlet e derruba o WebSocket, justamente a falha que a
+    # degradacao existe para evitar.
+    conv_id = conversation.id
+
     with setup_timer.measure("t_profile"):
         nutriz_profile = await get_nutriz_profile(db, user_id)
     if nutriz_profile is None:
         logger.warning(f"Perfil nao encontrado para user_id={user_id}, EVA seguira sem personalizacao")
+
+    # Contexto de doacao (etapa, agendamento, historico, local de coleta): lido
+    # UMA vez por conexao, como o perfil, e nunca por mensagem. Cada bloco
+    # degrada sozinho la dentro; aqui o try/except e a ultima rede: nenhuma
+    # falha na leitura pode derrubar o WebSocket.
+    with setup_timer.measure("t_donations"):
+        try:
+            donation_context = await get_donation_context(db, user_id)
+        except Exception:
+            logger.exception(
+                f"Falha ao montar contexto de doacao para user_id={user_id}; "
+                "EVA seguira sem esses dados"
+            )
+            await db.rollback()
+            donation_context = None
 
     setup_timer.log_summary(f"setup conexao user={user_id}")
 
@@ -156,7 +180,7 @@ async def websocket_chat(
             # a sessao.
             with turn_timer.measure("t_history_e_embedding"):
                 history, query_embedding = await asyncio.gather(
-                    chat_service.get_recent_messages(db, conversation.id, limit=10),
+                    chat_service.get_recent_messages(db, conv_id, limit=10),
                     embeddings_service.encode_async(user_message),
                 )
 
@@ -181,6 +205,7 @@ async def websocket_chat(
                 user_message,
                 rag_chunks,
                 profile=nutriz_profile,
+                donations=donation_context,
                 action_label=action.label if action else None,
             )
 
@@ -204,12 +229,12 @@ async def websocket_chat(
             # desconectar apos o done, nada se perde (llm_audit e obrigatorio).
             with turn_timer.measure("t_persist_user_msg"):
                 await chat_service.save_message(
-                    db, conversation.id, "user", user_message
+                    db, conv_id, "user", user_message
                 )
 
             with turn_timer.measure("t_persist_assistant"):
                 assistant_message = await chat_service.save_message(
-                    db, conversation.id, "assistant", full_response
+                    db, conv_id, "assistant", full_response
                 )
 
             chunks_used_audit = [
@@ -225,7 +250,7 @@ async def websocket_chat(
                 await chat_service.save_llm_audit(
                     db=db,
                     user_id=user_id,
-                    conversation_id=conversation.id,
+                    conversation_id=conv_id,
                     message_id=assistant_message.id,
                     prompt_full=messages,
                     llm_provider=provider.get_provider_name(),
@@ -242,7 +267,7 @@ async def websocket_chat(
 
             await websocket.send_json({"type": "done"})
 
-            turn_timer.log_summary(f"turno conversa={conversation.id}")
+            turn_timer.log_summary(f"turno conversa={conv_id}")
     except WebSocketDisconnect:
         return
     except Exception as e:
