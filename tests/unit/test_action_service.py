@@ -120,3 +120,75 @@ class TestSignupSomenteAnonimo:
             detect_action("queria falar com alguém", is_anonymous=False).slug
             == "whatsapp"
         )
+
+
+class TestNavegacaoParaTelas:
+    """Acoes de tela interna: so para a nutriz logada."""
+
+    def test_minhas_doacoes(self):
+        action = detect_action("quero ir para minhas doações", is_anonymous=False)
+        assert action is not None
+        assert action.slug == "my_donations"
+        assert action.label == "Ver minhas doacoes"
+
+    def test_minhas_doacoes_com_outro_verbo(self):
+        assert (
+            detect_action("me leva pra tela de minhas doações", is_anonymous=False).slug
+            == "my_donations"
+        )
+
+    def test_perfil(self):
+        assert (
+            detect_action("me leva pra tela de perfil", is_anonymous=False).slug
+            == "profile"
+        )
+
+    def test_perfil_por_meus_dados(self):
+        assert (
+            detect_action("onde vejo meus dados?", is_anonymous=False).slug == "profile"
+        )
+
+    def test_conteudo_educativo(self):
+        assert (
+            detect_action("quero ver o conteúdo educativo", is_anonymous=False).slug
+            == "content_hub"
+        )
+
+    def test_nova_doacao(self):
+        assert (
+            detect_action("quero fazer uma nova doação", is_anonymous=False).slug
+            == "new_donation"
+        )
+
+    def test_nova_doacao_doar_de_novo(self):
+        assert (
+            detect_action("quero doar de novo", is_anonymous=False).slug
+            == "new_donation"
+        )
+
+    def test_inicio(self):
+        assert (
+            detect_action("me leva para o início", is_anonymous=False).slug == "home"
+        )
+
+
+class TestNavegacaoNaoDisparaAToa:
+    def test_anonimo_nao_recebe_tela_interna(self):
+        # A rota nem existe no router publico do front.
+        assert detect_action("quero ver minhas doações", is_anonymous=True) is None
+
+    def test_pergunta_sobre_a_doacao_nao_vira_botao(self):
+        # Falar da doacao nao e pedir para navegar.
+        assert detect_action("quanto leite eu já doei?", is_anonymous=False) is None
+
+    def test_inicio_de_processo_nao_vira_home(self):
+        assert (
+            detect_action("o que faço no início da ordenha?", is_anonymous=False) is None
+        )
+
+    def test_tema_especifico_ainda_vence_conteudo_educativo(self):
+        # "como armazenar" continua indo para o artigo, nao para a central.
+        assert (
+            detect_action("como armazenar o leite?", is_anonymous=False).slug
+            == "articles"
+        )

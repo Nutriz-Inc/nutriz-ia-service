@@ -30,6 +30,9 @@ class _ActionRule:
     patterns: list[re.Pattern[str]]
     # signup so faz sentido para visitante anonimo; para nutriz logada, nunca.
     anonymous_only: bool = False
+    # Telas internas (minhas doacoes, perfil...) so existem com sessao: para
+    # visitante anonimo a rota nem esta no router do front.
+    authenticated_only: bool = False
     # Se algum destes casar, a regra e vetada (negacoes / falso positivo).
     blockers: list[re.Pattern[str]] = field(default_factory=list)
 
@@ -45,6 +48,30 @@ def _normalize(text: str) -> str:
 
 def _compile(patterns: list[str]) -> list[re.Pattern[str]]:
     return [re.compile(p) for p in patterns]
+
+
+# "quero ir para X", "me leva pra X", "onde vejo X", "abrir a tela de X".
+# O verbo e obrigatorio: sem ele, "minhas doacoes" no meio de uma frase
+# qualquer viraria botao (falso positivo).
+_VERBOS_NAVEGACAO = (
+    r"(?:ir|vou|abrir|abre|abro|acessar|acesso|ver|vejo|visualizar|mostrar|"
+    r"mostra|leva|leve|levar|entrar|entro|voltar|volta|navegar|consultar|"
+    r"consulto|checar|conferir|encontro|acompanhar|acompanho)"
+)
+
+
+def _navegacao(*alvos: str) -> list[str]:
+    """Padroes de intencao de navegacao para cada alvo (ja normalizado).
+
+    Gera duas formas por alvo: verbo de navegacao a ate ~28 caracteres do
+    alvo ("quero ir para a tela de minhas doacoes") e a mencao explicita de
+    tela/pagina ("tela de minhas doacoes").
+    """
+    padroes: list[str] = []
+    for alvo in alvos:
+        padroes.append(rf"\b{_VERBOS_NAVEGACAO}\b[^.?!]{{0,28}}\b{alvo}\b")
+        padroes.append(rf"\b(?:tela|pagina|aba|secao)\b[^.?!]{{0,16}}\b{alvo}\b")
+    return padroes
 
 
 # Catalogo em ORDEM DE PRIORIDADE (primeiro = maior prioridade).
@@ -124,6 +151,88 @@ ACTION_RULES: list[_ActionRule] = [
             ]
         ),
     ),
+    # --- Telas internas: so com sessao. Slug desconhecido nao vira botao no
+    # front (catalogo fechado la tambem), entao emitir para anonimo seria
+    # inofensivo, mas o veto evita prometer uma tela que ela nao tem.
+    _ActionRule(
+        slug="my_donations",
+        label="Ver minhas doacoes",
+        authenticated_only=True,
+        patterns=_compile(
+            _navegacao(
+                "minhas doacoes",
+                "minha doacao",
+                "historico de doacoes",
+                "doacoes anteriores",
+                "andamento da (?:minha )?doacao",
+            )
+        ),
+    ),
+    _ActionRule(
+        slug="new_donation",
+        label="Iniciar nova doacao",
+        authenticated_only=True,
+        patterns=_compile(
+            _navegacao("nova doacao", "outra doacao")
+            + [
+                r"\bquero doar (?:de novo|novamente|outra vez)\b",
+                r"\b(?:fazer|criar|iniciar|comecar) (?:uma )?(?:nova )?doacao\b",
+            ]
+        ),
+    ),
+    _ActionRule(
+        slug="profile",
+        label="Abrir meu perfil",
+        authenticated_only=True,
+        patterns=_compile(
+            _navegacao(
+                "meu perfil",
+                "perfil",
+                "meus dados",
+                "minha conta",
+                "meu cadastro",
+                "dados do bebe",
+                "meu bebe",
+            )
+            + [r"\b(?:editar|atualizar|corrigir|mudar|alterar) (?:os )?meus dados\b"]
+        ),
+    ),
+    _ActionRule(
+        slug="content_hub",
+        label="Ver conteudo educativo",
+        authenticated_only=True,
+        patterns=_compile(
+            _navegacao(
+                "conteudo educativo",
+                "conteudos educativos",
+                "central de conteudo",
+                "materiais educativos",
+            )
+        ),
+    ),
+    _ActionRule(
+        slug="home",
+        label="Ir para o inicio",
+        authenticated_only=True,
+        patterns=_compile(
+            _navegacao(
+                "pagina inicial",
+                "tela inicial",
+                "pagina principal",
+                "tela de inicio",
+                "home",
+                "painel",
+                "inicio",
+            )
+        ),
+        # "inicio" e palavra comum: veta quando fala do inicio de um processo.
+        blockers=_compile(
+            [
+                r"inicio (?:da|de|do) (?:ordenha|coleta|doacao|amamentacao|gestacao|processo|tratamento)",
+                r"(?:no|desde o) inicio",
+            ]
+        ),
+    ),
     _ActionRule(
         slug="articles",
         label="Ler artigo completo",
@@ -156,6 +265,8 @@ def detect_action(user_message: str, is_anonymous: bool) -> EvaAction | None:
 
     for rule in ACTION_RULES:
         if rule.anonymous_only and not is_anonymous:
+            continue
+        if rule.authenticated_only and is_anonymous:
             continue
         if any(blocker.search(text) for blocker in rule.blockers):
             continue
