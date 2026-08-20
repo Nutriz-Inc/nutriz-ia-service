@@ -358,3 +358,143 @@ class TestRagNoFluxoDoChat:
         system_prompt = fake_provider.calls[-1][0]["content"]
         assert "CONTEXTO DOS PROTOCOLOS" not in system_prompt
         assert "conhecimento geral confiavel" in system_prompt
+
+
+class TestContextoDeDoacaoNoChat:
+    """A nutriz logada pergunta pela propria doacao: o dado real tem que chegar
+    ao prompt do LLM - e a busca nunca pode derrubar a conexao."""
+
+    def test_doacao_e_historico_chegam_ao_prompt(
+        self, app_with_overrides, seed_consent, seed_donations, valid_token, fake_provider
+    ):
+        with TestClient(app_with_overrides) as client:
+            with client.websocket_connect(f"/ws/chat?token={valid_token}") as ws:
+                ws.receive_json()
+                ws.send_json({"message": "em que etapa esta minha doacao?"})
+                _collect_turn(ws)
+
+        system_prompt = fake_provider.calls[-1][0]["content"]
+        assert "DOACOES DA NUTRIZ" in system_prompt
+        assert 'etapa atual "Coletar leite" (pendente)' in system_prompt
+        assert "Banco de Leite Teste" in system_prompt
+        assert "1250 ml doados" in system_prompt
+
+    def test_contexto_de_doacao_e_buscado_uma_vez_por_conexao(
+        self, app_with_overrides, seed_consent, seed_donations, valid_token,
+        fake_provider, monkeypatch
+    ):
+        # Custo e latencia: a leitura acompanha o perfil (1x na conexao), nunca
+        # roda a cada mensagem.
+        import app.routers.chat_ws as chat_ws_module
+
+        chamadas = []
+        original = chat_ws_module.get_donation_context
+
+        async def contando(db, id_user):
+            chamadas.append(id_user)
+            return await original(db, id_user)
+
+        monkeypatch.setattr(chat_ws_module, "get_donation_context", contando)
+
+        with TestClient(app_with_overrides) as client:
+            with client.websocket_connect(f"/ws/chat?token={valid_token}") as ws:
+                ws.receive_json()
+                ws.send_json({"message": "em que etapa esta minha doacao?"})
+                _collect_turn(ws)
+                ws.send_json({"message": "e quanto eu ja doei?"})
+                _collect_turn(ws)
+
+        assert len(chamadas) == 1
+        # As duas mensagens seguem com o contexto carregado na conexao.
+        assert "DOACOES DA NUTRIZ" in fake_provider.calls[-1][0]["content"]
+
+    def test_falha_na_busca_nao_derruba_a_conexao(
+        self, app_with_overrides, seed_consent, seed_donations, valid_token,
+        fake_provider, monkeypatch
+    ):
+        # Regressao do incidente do perfil: erro na leitura do contexto matava o
+        # WebSocket. A EVA tem que responder sem o bloco, com a conexao viva.
+        import app.routers.chat_ws as chat_ws_module
+
+        async def explode(db, id_user):
+            raise Exception("falha simulada na leitura das doacoes")
+
+        monkeypatch.setattr(chat_ws_module, "get_donation_context", explode)
+
+        with TestClient(app_with_overrides) as client:
+            with client.websocket_connect(f"/ws/chat?token={valid_token}") as ws:
+                ws.receive_json()
+                ws.send_json({"message": "em que etapa esta minha doacao?"})
+                resposta = _collect_turn(ws)
+                # Conexao segue viva para o turno seguinte
+                ws.send_json({"message": "obrigada"})
+                _collect_turn(ws)
+
+        assert resposta
+        system_prompt = fake_provider.calls[-1][0]["content"]
+        assert "DOACOES DA NUTRIZ" not in system_prompt
+        # Sem o bloco, o resto do prompt (persona, perfil, RAG) continua de pe.
+        assert "PERFIL DA NUTRIZ" in system_prompt
+
+    def test_nutriz_sem_doacoes_recebe_contexto_explicito(
+        self, app_with_overrides, seed_consent, valid_token, fake_provider
+    ):
+        with TestClient(app_with_overrides) as client:
+            with client.websocket_connect(f"/ws/chat?token={valid_token}") as ws:
+                ws.receive_json()
+                ws.send_json({"message": "quantas doacoes eu ja fiz?"})
+                _collect_turn(ws)
+
+        system_prompt = fake_provider.calls[-1][0]["content"]
+        assert "nenhuma doacao registrada ate agora" in system_prompt
+
+    async def test_status_do_exame_chega_mascarado_ao_prompt(
+        self, app_with_overrides, seed_consent, seed_donations, valid_token,
+        fake_provider, db_session
+    ):
+        # O desfecho do exame e dado de saude: nem o status cru nem qualquer
+        # texto clinico podem chegar a Groq (o prompt fica gravado no llm_audit).
+        await db_session.execute(
+            text(
+                "UPDATE donation_step SET status = 'failed' "
+                "WHERE id_donation_step = 'dst_exame'"
+            )
+        )
+        await db_session.commit()
+
+        with TestClient(app_with_overrides) as client:
+            with client.websocket_connect(f"/ws/chat?token={valid_token}") as ws:
+                ws.receive_json()
+                ws.send_json({"message": "meu exame deu tudo certo?"})
+                _collect_turn(ws)
+
+        system_prompt = fake_provider.calls[-1][0]["content"]
+        assert "nao aprovada" not in system_prompt
+        assert "aguardando retorno da equipe Lactare" in system_prompt
+
+    def test_falha_na_busca_do_perfil_tambem_nao_derruba_a_conexao(
+        self, app_with_overrides, seed_consent, seed_donations, valid_token,
+        fake_provider, monkeypatch
+    ):
+        # Mesmo mecanismo do teste acima, no bloco que ja existia. Aqui o dublê
+        # reproduz a degradacao REAL do profile_service (que trata a excecao
+        # internamente): rollback na sessao + None. E o rollback que expira os
+        # objetos ORM e quebrava o turno seguinte.
+        import app.routers.chat_ws as chat_ws_module
+
+        async def degrada(db, id_user):
+            await db.rollback()
+            return None
+
+        monkeypatch.setattr(chat_ws_module, "get_nutriz_profile", degrada)
+
+        with TestClient(app_with_overrides) as client:
+            with client.websocket_connect(f"/ws/chat?token={valid_token}") as ws:
+                ws.receive_json()
+                ws.send_json({"message": "oi"})
+                assert _collect_turn(ws)
+
+        system_prompt = fake_provider.calls[-1][0]["content"]
+        assert "PERFIL DA NUTRIZ" not in system_prompt
+        # O contexto de doacao, que nao falhou, continua no prompt.
+        assert "DOACOES DA NUTRIZ" in system_prompt

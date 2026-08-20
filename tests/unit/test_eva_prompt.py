@@ -1,7 +1,15 @@
-# Testes da montagem de prompts da EVA (com/sem RAG, com/sem perfil).
+# Testes da montagem de prompts da EVA (com/sem RAG, com/sem perfil, com/sem
+# contexto de doacao).
 
 from datetime import datetime
+from decimal import Decimal
 
+from app.schemas.donation import (
+    ActiveDonation,
+    CollectionPlace,
+    DonationContext,
+    DonationHistory,
+)
 from app.schemas.profile import AddressProfile, BabyProfile, NutrizProfile
 from app.schemas.rag import ChunkSearchResult
 from app.services.eva_prompt import (
@@ -9,6 +17,7 @@ from app.services.eva_prompt import (
     MAX_CHUNK_WORDS,
     build_messages_for_llm,
     build_messages_for_llm_with_rag,
+    build_messages_for_public_llm,
 )
 
 
@@ -146,3 +155,150 @@ def test_chunk_longo_e_truncado_no_prompt():
     assert f"palavra{MAX_CHUNK_WORDS - 1}" in system
     assert f"palavra{MAX_CHUNK_WORDS}" not in system
     assert "[...]" in system
+
+
+# ---------------------------------------------------------------------------
+# Contexto de doacao (modo logado)
+# ---------------------------------------------------------------------------
+
+def _donation_context(
+    with_donation: bool = True,
+    with_history: bool = True,
+    is_active: bool = True,
+    current_step_name: str | None = "Coletar leite",
+    status_label: str | None = "pendente",
+    with_place: bool = True,
+    total_donations: int = 2,
+    volume: str | None = "1250.00",
+) -> DonationContext:
+    donation = None
+    if with_donation:
+        place = None
+        if with_place:
+            place = CollectionPlace(
+                donation_point_name="Banco de Leite Teste",
+                neighborhood="Vila Clementino",
+                city="Sao Paulo",
+                state="SP",
+            )
+        donation = ActiveDonation(
+            id_donation="don_2veL1FPpuXxUaZcFaEC57BfpcKE",
+            is_active=is_active,
+            created_at=datetime(2026, 8, 9),
+            current_step_name=current_step_name,
+            current_step_status_label=status_label,
+            current_step_set_date=datetime(2026, 8, 24) if current_step_name else None,
+            next_step_name="Análise de leite" if current_step_name == "Coletar leite" else None,
+            place=place,
+        )
+    history = None
+    if with_history:
+        history = DonationHistory(
+            total_donations=total_donations,
+            concluded_donations=1 if total_donations else 0,
+            total_volume_ml=Decimal(volume) if volume else None,
+            last_donation_at=datetime(2026, 8, 9) if total_donations else None,
+        )
+    return DonationContext(donation=donation, history=history)
+
+
+def test_com_doacao_prompt_traz_etapa_data_proxima_e_local():
+    messages = build_messages_for_llm_with_rag(
+        [], "em que etapa esta minha doacao?", [], donations=_donation_context()
+    )
+    system = messages[0]["content"]
+    assert "DOACOES DA NUTRIZ" in system
+    assert "Doacao em andamento" in system
+    assert 'etapa atual "Coletar leite" (pendente)' in system
+    assert "prevista para 24/08/2026" in system
+    assert 'proxima etapa "Análise de leite"' in system
+    assert "local: Banco de Leite Teste, Vila Clementino, Sao Paulo/SP" in system
+
+
+def test_historico_com_volume_e_totais_no_prompt():
+    messages = build_messages_for_llm_with_rag(
+        [], "quanto ja doei?", [], donations=_donation_context()
+    )
+    system = messages[0]["content"]
+    assert "2 doacoes no total" in system
+    assert "1 concluidas" in system
+    # Volume sem zeros a direita: menos token e menos ruido na resposta.
+    assert "1250 ml doados" in system
+    assert "1250.00" not in system
+
+
+def test_volume_fracionado_mantem_a_casa_decimal():
+    messages = build_messages_for_llm_with_rag(
+        [], "quanto ja doei?", [], donations=_donation_context(volume="980.50")
+    )
+    assert "980.5 ml doados" in messages[0]["content"]
+
+
+def test_sem_doacoes_registradas_o_prompt_diz_isso_explicitamente():
+    # Nutriz sem doacao: nao pode faltar contexto (a EVA inventaria), nem dar erro.
+    messages = build_messages_for_llm_with_rag(
+        [], "quantas doacoes eu fiz?", [],
+        donations=_donation_context(with_donation=False, total_donations=0, volume=None),
+    )
+    system = messages[0]["content"]
+    assert "nenhuma doacao registrada ate agora" in system
+    assert "Doacao em andamento" not in system
+
+
+def test_sem_contexto_de_doacao_nao_ha_secao():
+    assert "DOACOES DA NUTRIZ" not in build_messages_for_llm_with_rag(
+        [], "oi", [], donations=None
+    )[0]["content"]
+
+
+def test_falha_total_na_busca_nao_gera_secao_vazia():
+    # Ambos os blocos falharam: a secao inteira some do prompt em vez de entrar
+    # vazia (uma secao vazia convidaria a EVA a preencher com invencao).
+    vazio = DonationContext(donation=None, history=None)
+    assert "DOACOES DA NUTRIZ" not in build_messages_for_llm_with_rag(
+        [], "oi", [], donations=vazio
+    )[0]["content"]
+
+
+def test_falha_em_um_bloco_mantem_o_outro_no_prompt():
+    messages = build_messages_for_llm_with_rag(
+        [], "oi", [], donations=_donation_context(with_donation=False)
+    )
+    system = messages[0]["content"]
+    assert "DOACOES DA NUTRIZ" in system
+    assert "2 doacoes no total" in system
+    assert "Doacao em andamento" not in system
+
+
+def test_doacao_encerrada_e_rotulada_como_ultima():
+    messages = build_messages_for_llm_with_rag(
+        [], "qual foi o ponto de coleta?", [],
+        donations=_donation_context(is_active=False, current_step_name=None),
+    )
+    system = messages[0]["content"]
+    assert "Ultima doacao (encerrada)" in system
+    assert "todas as etapas concluidas" in system
+
+
+def test_instrucoes_de_uso_proibem_inventar_e_lembram_do_limite_clinico():
+    system = build_messages_for_llm_with_rag(
+        [], "oi", [], donations=_donation_context()
+    )[0]["content"]
+    assert "INSTRUCOES DE USO DAS DOACOES" in system
+    assert "NUNCA estime, deduza ou invente" in system
+    assert "nao tem acesso a exames" in system
+
+
+def test_persona_avisa_que_nao_acessa_exames():
+    # Vale mesmo sem contexto de doacao: a recusa nao pode depender do bloco.
+    system = build_messages_for_llm([], "quais meus resultados de exame?")[0]["content"]
+    assert "NÃO tem acesso a exames" in system
+    assert "sorologias" in system
+
+
+def test_modo_publico_avisa_que_nao_tem_acesso_a_doacoes():
+    system = build_messages_for_public_llm([], "em que etapa esta minha doacao?", [])[0][
+        "content"
+    ]
+    assert "nao tem acesso a cadastro, doacoes" in system
+    assert "DOACOES DA NUTRIZ" not in system

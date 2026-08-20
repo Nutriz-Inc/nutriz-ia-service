@@ -51,3 +51,45 @@ postura já adotada para o perfil: o chat degrada sem personalização em vez de
 bloquear a nutriz, já que em dev o espelho pode não ter o registro.
 
 Custo: uma query a mais por conexão (não por turno), medida como `t_role`.
+
+---
+
+## 2026-08-19 — Contexto de doação no modo logado, sem nenhum dado clínico
+
+A EVA passou a receber o estado da doação da nutriz (etapa atual, data prevista,
+próxima etapa, ponto de coleta, total de doações e volume). O corte foi feito
+pelo risco, não pela disponibilidade do dado: **status, datas e local entram;
+texto livre não**.
+
+`donation_step.description`, `donation_step_timeline.description`, `job` e
+`donation.user_feedback` são preenchidos por adm com teor clínico ("sorologia
+reagente", motivo de inaptidão). Em vez de filtrar na saída, as colunas **não
+são mapeadas no ORM** e as duas tabelas não são espelhadas — o dado não existe
+no processo, então não há como vazar num refactor futuro. Complementarmente, o
+status `warn`/`failed` da etapa `Exame de sangue` é mascarado: ele revelaria o
+desfecho da sorologia por inferência.
+
+Motivo do rigor: o prompt vai para a Groq (terceiro) e fica gravado no
+`llm_audit`, que é append-only e imutável — o que vaza uma vez fica lá.
+
+Custo: ~250 tokens por conexão no system prompt (~+20%), lidos **1x por
+conexão** (`t_donations`), não por mensagem.
+
+---
+
+## 2026-08-19 — Id da conversa como valor puro após as leituras que degradam
+
+Bug encontrado ao testar a resiliência do contexto de doação, mas que já existia
+no caminho do perfil: quando uma leitura opcional falha, o serviço chama
+`db.rollback()` para não deixar a sessão em transação abortada — e o rollback
+**expira todos os objetos ORM da sessão**. O `conversation` carregado antes
+virava um objeto expirado, e o primeiro acesso a `conversation.id` no turno
+seguinte disparava um refresh **síncrono** dentro do loop async:
+`MissingGreenlet` → exceção não tratada → WebSocket derrubado.
+
+Ou seja: a degradação que existia para *evitar* a queda da conexão era
+exatamente o que a causava. O router agora copia `conv_id = conversation.id`
+logo após criar/recuperar a conversa e nunca mais toca no objeto ORM.
+
+Regra geral: depois de um `rollback` de degradação, nenhum objeto ORM carregado
+antes dele pode ser usado.

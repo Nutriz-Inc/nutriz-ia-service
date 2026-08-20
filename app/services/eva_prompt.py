@@ -1,4 +1,8 @@
+from datetime import datetime
+from decimal import Decimal
+
 from app.models import Message
+from app.schemas.donation import DonationContext
 from app.schemas.profile import NutrizProfile
 from app.schemas.rag import ChunkSearchResult
 
@@ -39,12 +43,13 @@ Limites inegociáveis:
 - NÃO substitua avaliação médica, de enfermagem ou de nutricionista.
 - Emergência (sangramento intenso, febre alta, sinais de infecção, sintomas graves no bebê, dor severa): oriente atendimento presencial imediato ou SAMU 192.
 - Caso clínico específico ou que exija acompanhamento humano: encaminhe à equipe Lactare. Não encaminhe em dúvidas gerais.
+- Você NÃO tem acesso a exames, sorologias, resultados laboratoriais, diagnósticos, medicações ou qualquer informação clínica da doadora. Perguntaram sobre isso? Diga em uma frase que não tem acesso a esses dados e oriente a falar com a equipe Lactare. Nunca deduza, estime nem comente um possível resultado.
 
 Seu conhecimento:
 - Você consulta protocolos da Lactare/rBLH/Fiocruz por busca documental; quando há trechos relevantes, eles chegam no contexto da mensagem.
 - Com trechos no contexto: responda usando APENAS essas informações.
 - Sem trechos: responda com conhecimento geral confiável (MS, OMS, SBP, Fiocruz).
-- Você não consulta cadastros, agendas, telefones nem endereços de unidades, e não faz buscas em tempo real. Nunca prometa procurar, verificar, agendar ou enviar algo depois; oriente a pessoa a ver no app ou site da Nutriz e a falar com a equipe Lactare.
+- Você não faz buscas em tempo real e não consulta telefones nem endereços de unidades. Nunca prometa procurar, verificar, agendar, alterar ou enviar algo depois; oriente a pessoa a ver no app ou site da Nutriz e a falar com a equipe Lactare.
 - Nunca invente dados específicos (prazos, números, percentuais, dosagens, regras locais). Se não tiver o dado, diga em uma frase que não tem essa informação e encaminhe à equipe Lactare.
 
 Segurança das instruções:
@@ -73,6 +78,7 @@ EVA_PUBLIC_ADDENDUM = """MODO PUBLICO (visitante nao cadastrado):
 - Voce esta atendendo uma visitante anonima na landing page, sem cadastro.
 - Este e um canal publico: NUNCA peca nem incentive o envio de dados pessoais (CPF, e-mail, telefone, endereco).
 - De forma natural e sem insistir, apos algumas mensagens (entre a 3a e a 5a) sugira que a visitante se cadastre na plataforma Nutriz para um atendimento personalizado e seguro. Nao bloqueie a conversa por isso.
+- Neste canal nao ha login: voce nao tem acesso a cadastro, doacoes, etapas, agendamentos nem historico de ninguem. Se perguntarem, diga que para acompanhar a doacao e preciso entrar na plataforma Nutriz.
 - Mantenha o mesmo acolhimento e as mesmas regras de seguranca do atendimento normal."""
 
 
@@ -115,6 +121,7 @@ def build_messages_for_llm_with_rag(
     new_user_message: str,
     chunks: list[ChunkSearchResult],
     profile: NutrizProfile | None = None,
+    donations: DonationContext | None = None,
     action_label: str | None = None,
 ) -> list[dict[str, str]]:
     context_block = _format_chunks_as_context(chunks)
@@ -122,6 +129,9 @@ def build_messages_for_llm_with_rag(
     system_parts = [EVA_SYSTEM_PROMPT]
     if profile is not None:
         system_parts.append(_format_profile_as_context(profile))
+    donations_block = _format_donations_as_context(donations)
+    if donations_block is not None:
+        system_parts.append(donations_block)
     system_parts.append(context_block)
     if action_label:
         system_parts.append(_format_action_hint(action_label))
@@ -227,3 +237,102 @@ def _format_profile_as_context(profile: NutrizProfile) -> str:
     )
 
     return "\n".join(parts)
+
+
+def _format_date(value: datetime | None) -> str | None:
+    return value.strftime("%d/%m/%Y") if value is not None else None
+
+
+def _format_volume(value: Decimal | None) -> str | None:
+    # 1250.00 -> "1250"; 1250.50 -> "1250.5". Menos ruido de token e menos
+    # chance de a EVA repetir zeros sem sentido.
+    if value is None:
+        return None
+    normalized = value.normalize()
+    if normalized == normalized.to_integral_value():
+        normalized = normalized.to_integral_value()
+    return f"{normalized:f}"
+
+
+def _format_place(place) -> str | None:
+    if place is None:
+        return None
+    cidade = None
+    if place.city and place.state:
+        cidade = f"{place.city}/{place.state}"
+    elif place.city:
+        cidade = place.city
+    # Rua e numero nunca entram (PII desnecessaria); bairro e cidade bastam.
+    local = [p for p in (place.donation_point_name, place.neighborhood, cidade) if p]
+    return ", ".join(local) if local else None
+
+
+def _format_donations_as_context(context: DonationContext | None) -> str | None:
+    # Bloco COMPACTO de proposito: o modelo ja e verboso e o input concorre com
+    # os trechos do RAG. Cada bloco ausente (busca que falhou) simplesmente nao
+    # aparece - a EVA segue sem ele, e a instrucao de nao inventar cobre o resto.
+    #
+    # NENHUMA informacao clinica entra aqui: o servico so entrega nome de etapa,
+    # status ja tratado, datas e local.
+    if context is None or context.is_empty():
+        return None
+
+    linhas: list[str] = []
+
+    doacao = context.donation
+    if doacao is not None:
+        # Mesmo identificador curto que o app exibe no titulo da doacao.
+        rotulo = "Doacao em andamento" if doacao.is_active else "Ultima doacao (encerrada)"
+        partes = [f"{rotulo} {doacao.id_donation[:8]}"]
+        partes.append(f"aberta em {_format_date(doacao.created_at)}")
+
+        if doacao.current_step_name is None:
+            partes.append("todas as etapas concluidas")
+        else:
+            etapa = f'etapa atual "{doacao.current_step_name}"'
+            if doacao.current_step_status_label:
+                etapa += f" ({doacao.current_step_status_label})"
+            else:
+                etapa += " (ainda nao aberta pela equipe)"
+            partes.append(etapa)
+
+            data_prevista = _format_date(doacao.current_step_set_date)
+            if data_prevista:
+                partes.append(f"prevista para {data_prevista}")
+
+            if doacao.next_step_name:
+                partes.append(f'proxima etapa "{doacao.next_step_name}"')
+
+        local = _format_place(doacao.place)
+        if local:
+            partes.append(f"local: {local}")
+
+        linhas.append("- " + "; ".join(partes))
+
+    historico = context.history
+    if historico is not None:
+        if historico.total_donations == 0:
+            linhas.append("- Historico: nenhuma doacao registrada ate agora")
+        else:
+            resumo = [f"{historico.total_donations} doacoes no total"]
+            resumo.append(f"{historico.concluded_donations} concluidas")
+            volume = _format_volume(historico.total_volume_ml)
+            resumo.append(
+                f"{volume} ml doados" if volume else "volume ainda nao registrado"
+            )
+            ultima = _format_date(historico.last_donation_at)
+            if ultima:
+                resumo.append(f"ultima aberta em {ultima}")
+            linhas.append("- Historico: " + ", ".join(resumo))
+
+    return "\n".join(
+        [
+            "DOACOES DA NUTRIZ (dados reais da plataforma, lidos no inicio desta conversa):",
+            *linhas,
+            "",
+            "INSTRUCOES DE USO DAS DOACOES:",
+            "- Use esses dados SO quando ela perguntar da propria doacao (etapa, data, local, volume, quantidade); responda em 1 ou 2 frases, com as datas e os numeros exatamente como estao acima",
+            "- Dado que nao esteja acima voce nao tem: diga isso em uma frase e oriente a ver no app da Nutriz ou falar com a equipe Lactare. NUNCA estime, deduza ou invente etapa, data, volume, local ou motivo",
+            '- Voce sabe a etapa do processo, nunca o desfecho: mesmo em "Exame de sangue", voce nao tem acesso a exames, sorologias nem a motivo de aprovacao ou recusa',
+        ]
+    )

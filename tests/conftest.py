@@ -161,7 +161,8 @@ async def db_session(test_engine) -> AsyncIterator[AsyncSession]:
         await conn.execute(
             text(
                 'TRUNCATE TABLE llm_audit, messages, conversations, kb_chunks, '
-                'consent_log, user_baby, address, "user" CASCADE'
+                'consent_log, user_baby, donation_step, donation, '
+                'donation_point, address, "user" CASCADE'
             )
         )
         await conn.commit()
@@ -226,6 +227,107 @@ async def seed_baby_and_address(db_session: AsyncSession, seed_user: str) -> str
         {"id": seed_user, "now": now},
     )
     await db_session.commit()
+    return seed_user
+
+
+# ---------------------------------------------------------------------------
+# Seeds de doacao (ponto de coleta + doacao encerrada + doacao em andamento)
+# ---------------------------------------------------------------------------
+
+SEED_DONATION_POINT_ID = "dpt_teste"
+SEED_DONATION_POINT_NAME = "Banco de Leite Teste"
+SEED_DONATION_POINT_ADDRESS_ID = "adr_dpteste"
+SEED_DONATION_ACTIVE_ID = "don_ativa01"
+SEED_DONATION_OLD_ID = "don_antiga1"
+
+
+async def insert_donation_step(
+    db_session: AsyncSession,
+    id_step: str,
+    id_donation: str,
+    name: str,
+    status: str,
+    created_at: datetime,
+    set_date: datetime | None = None,
+    id_address: str | None = None,
+    id_user: str = SEED_USER_ID,
+) -> None:
+    await db_session.execute(
+        text(
+            "INSERT INTO donation_step (id_donation_step, id_donation, id_address, "
+            "name, status, set_date, created_at) VALUES "
+            "(:id, :id_donation, :id_address, :name, :status, :set_date, :created_at)"
+        ),
+        {
+            "id": id_step,
+            "id_donation": id_donation,
+            "id_address": id_address,
+            "name": name,
+            "status": status,
+            "set_date": set_date,
+            "created_at": created_at,
+        },
+    )
+    await db_session.commit()
+
+
+@pytest_asyncio.fixture(loop_scope="session")
+async def seed_donations(db_session: AsyncSession, seed_user: str) -> str:
+    now = _naive_now()
+
+    await db_session.execute(
+        text(
+            "INSERT INTO donation_point (id_donation_point, name) "
+            "VALUES (:id, :name)"
+        ),
+        {"id": SEED_DONATION_POINT_ID, "name": SEED_DONATION_POINT_NAME},
+    )
+    await db_session.execute(
+        text(
+            "INSERT INTO address (id_address, id_donation_point, zipcode, street, "
+            "number, neighborhood, city, state, created_at) VALUES "
+            "(:id, :id_dp, '04040033', 'Rua Loefgren', '101', 'Vila Clementino', "
+            "'Sao Paulo', 'SP', :now)"
+        ),
+        {
+            "id": SEED_DONATION_POINT_ADDRESS_ID,
+            "id_dp": SEED_DONATION_POINT_ID,
+            "now": now,
+        },
+    )
+
+    # Doacao ja encerrada, com volume registrado
+    await db_session.execute(
+        text(
+            "INSERT INTO donation (id_donation, created_by, is_active, "
+            "quantity_donated, created_at) VALUES (:id, :user, false, 700.00, :created)"
+        ),
+        {"id": SEED_DONATION_OLD_ID, "user": seed_user, "created": now - timedelta(days=90)},
+    )
+    # Doacao em andamento: exame e kit concluidos, coleta pendente e agendada
+    await db_session.execute(
+        text(
+            "INSERT INTO donation (id_donation, created_by, is_active, "
+            "quantity_donated, created_at) VALUES (:id, :user, true, 550.00, :created)"
+        ),
+        {"id": SEED_DONATION_ACTIVE_ID, "user": seed_user, "created": now - timedelta(days=10)},
+    )
+    await db_session.commit()
+
+    await insert_donation_step(
+        db_session, "dst_exame", SEED_DONATION_ACTIVE_ID, "Exame de sangue",
+        "done", now - timedelta(days=10),
+    )
+    await insert_donation_step(
+        db_session, "dst_kit", SEED_DONATION_ACTIVE_ID, "Entregar kit de ordenha",
+        "done", now - timedelta(days=6),
+    )
+    await insert_donation_step(
+        db_session, "dst_coleta", SEED_DONATION_ACTIVE_ID, "Coletar leite",
+        "pending", now - timedelta(days=2),
+        set_date=now + timedelta(days=5),
+        id_address=SEED_DONATION_POINT_ADDRESS_ID,
+    )
     return seed_user
 
 
