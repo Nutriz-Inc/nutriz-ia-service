@@ -302,3 +302,89 @@ def test_modo_publico_avisa_que_nao_tem_acesso_a_doacoes():
     ]
     assert "nao tem acesso a cadastro, doacoes" in system
     assert "DOACOES DA NUTRIZ" not in system
+
+
+class TestContextoDosPapeisDaEquipe:
+    def test_data_iso_da_api_nao_quebra_o_contexto_de_jobs(self):
+        from app.services.eva_prompt import _format_jobs_as_context
+
+        bloco = _format_jobs_as_context(
+            [{"id_job": "j1", "id_step": "dst_val_kit", "status": "pending", "date_set": "2026-09-11T10:00:00Z"}],
+            {"dst_val_kit": "Entregar kit de ordenha"},
+        )
+
+        assert "Entregar kit de ordenha" in bloco
+        assert "11/09/2026" in bloco
+
+    def test_job_sem_etapa_conhecida_nao_quebra(self):
+        from app.services.eva_prompt import _format_jobs_as_context
+
+        bloco = _format_jobs_as_context(
+            [{"id_job": "j1", "id_step": "desconhecido", "status": "pending"}], {}
+        )
+
+        assert "etapa nao identificada" in bloco
+        assert "sem data marcada" in bloco
+
+    def test_sem_jobs_diz_que_nao_ha(self):
+        from app.services.eva_prompt import _format_jobs_as_context
+
+        assert "nenhum agendamento pendente" in _format_jobs_as_context([])
+
+    def test_rota_em_andamento_traz_o_tempo_contra_o_limite(self):
+        from datetime import datetime, timedelta, timezone
+
+        from app.services.eva_prompt import _format_routes_as_context
+
+        inicio = (datetime.now(timezone.utc) - timedelta(hours=5, minutes=30)).isoformat()
+        bloco = _format_routes_as_context(
+            [{"id_route": "r1", "name": "Coletas zona sul", "status": "in_progress", "date_start": inicio}],
+            [],
+        )
+
+        assert "Coletas zona sul" in bloco
+        assert "Restam 0h2" in bloco or "Restam 0h3" in bloco
+        assert "limite de 6 horas" in bloco
+
+    def test_rota_estourada_avisa_que_passou(self):
+        from datetime import datetime, timedelta, timezone
+
+        from app.services.eva_prompt import _format_routes_as_context
+
+        inicio = (datetime.now(timezone.utc) - timedelta(hours=7)).isoformat()
+        bloco = _format_routes_as_context(
+            [{"id_route": "r1", "name": "Rota", "status": "in_progress", "date_start": inicio}], []
+        )
+
+        assert "JA PASSOU do limite" in bloco
+
+    def test_rota_nao_iniciada_diz_que_o_limite_nao_comecou(self):
+        from app.services.eva_prompt import _format_routes_as_context
+
+        bloco = _format_routes_as_context(
+            [{"id_route": "r1", "name": "Rota", "status": "pending"}], []
+        )
+
+        assert "ainda nao comecou a contar" in bloco
+
+    def test_sem_rota_diz_que_nao_ha(self):
+        from app.services.eva_prompt import _format_routes_as_context
+
+        assert "nenhuma rota atribuida" in _format_routes_as_context([], [])
+
+    def test_dashboard_vazio_devolve_none(self):
+        from app.services.eva_prompt import _format_dashboard_as_context
+
+        assert _format_dashboard_as_context(None) is None
+        assert _format_dashboard_as_context({}) is None
+
+    def test_dashboard_formata_os_agregados(self):
+        from app.services.eva_prompt import _format_dashboard_as_context
+
+        bloco = _format_dashboard_as_context(
+            {"total_milk_collected": 12450, "average_route_duration_hours": 5.4}
+        )
+
+        assert "12450" in bloco
+        assert "5,4" in bloco
+        assert "nunca de uma pessoa" in bloco

@@ -338,6 +338,17 @@ def _format_donations_as_context(context: DonationContext | None) -> str | None:
     )
 
 
+def _data_da_api(valor: object) -> datetime | None:
+    if isinstance(valor, datetime):
+        return valor
+    if isinstance(valor, str) and valor:
+        try:
+            return datetime.fromisoformat(valor.replace("Z", "+00:00"))
+        except ValueError:
+            return None
+    return None
+
+
 def _formatar_numero(valor: object) -> str:
     if isinstance(valor, (int, float, Decimal)):
         numero = float(valor)
@@ -414,7 +425,7 @@ def _format_jobs_as_context(
     linhas = []
     for indice, job in enumerate(jobs, start=1):
         etapa = nomes_de_etapa.get(str(job.get("id_step")), "etapa nao identificada")
-        data = _format_date(job.get("date_set")) or "sem data marcada"
+        data = _format_date(_data_da_api(job.get("date_set"))) or "sem data marcada"
         linhas.append(f"- {indice}. {etapa} - situacao: {job.get('status')} - {data}")
 
     corpo = "\n".join(linhas)
@@ -423,6 +434,28 @@ def _format_jobs_as_context(
         f"{corpo}\n"
         "Voce so enxerga os agendamentos desta pessoa. Nao ha descricao clinica "
         "nem dado de exame disponivel para voce."
+    )
+
+
+LIMITE_DA_ROTA_EM_HORAS = 6
+
+
+def _tempo_contra_o_limite(inicio: datetime, fim: datetime | None) -> str:
+    referencia = fim or datetime.now(inicio.tzinfo)
+    decorrido = referencia - inicio
+    horas = decorrido.total_seconds() / 3600
+    restante = LIMITE_DA_ROTA_EM_HORAS - horas
+
+    decorrido_texto = f"{int(horas)}h{int((horas % 1) * 60):02d}"
+    if restante <= 0:
+        return (
+            f"- Tempo decorrido: {decorrido_texto}. "
+            f"JA PASSOU do limite de {LIMITE_DA_ROTA_EM_HORAS} horas."
+        )
+    return (
+        f"- Tempo decorrido: {decorrido_texto}. "
+        f"Restam {int(restante)}h{int((restante % 1) * 60):02d} "
+        f"do limite de {LIMITE_DA_ROTA_EM_HORAS} horas."
     )
 
 
@@ -446,11 +479,13 @@ def _format_routes_as_context(
     if regiao:
         linhas.append(f"- Regiao: {regiao}")
 
-    inicio = _format_date(atual.get("date_start"))
+    comeco = _data_da_api(atual.get("date_start"))
+    inicio = _format_date(comeco)
     if inicio:
         linhas.append(f"- Iniciada em: {inicio}")
+        linhas.append(_tempo_contra_o_limite(comeco, _data_da_api(atual.get("date_end"))))
     else:
-        linhas.append("- Ainda nao iniciada")
+        linhas.append("- Ainda nao iniciada, entao o limite de 6 horas ainda nao comecou a contar")
 
     if atual.get("mileage") is not None:
         linhas.append(f"- Km percorridos: {_formatar_numero(atual['mileage'])}")
