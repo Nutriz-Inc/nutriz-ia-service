@@ -48,17 +48,21 @@ Emite um **session token** temporário (JWT). Sem autenticação prévia.
 - Limites configuráveis via env: `ANON_RATE_LIMIT_PER_IP_HOUR`,
   `ANON_RATE_LIMIT_PER_SESSION`.
 
-### 2. Detecção de PII na entrada (`app/services/public_guard.py`)
+### 2. Detecção de PII na entrada (`app/services/input_guard.py`)
 - Regex para **CPF** (pontuado ou 11 dígitos), **e-mail** e **telefone** BR.
 - Se detectado, o dado sensível **não é repassado ao LLM nem auditado**. A EVA
   responde orientando a não compartilhar dados pessoais e a se cadastrar.
 - Protege o visitante e a conformidade LGPD.
 
-### 3. Anti-jailbreak / escopo (`app/services/public_guard.py`)
+### 3. Anti-jailbreak / escopo (`app/services/input_guard.py`)
 - Regex para padrões de fuga de escopo ("ignore as instruções", "aja como",
   "system prompt", "modo desenvolvedor", etc.).
 - Acumula **strikes** na sessão. Ao atingir **3** (`ANON_MAX_JAILBREAK_STRIKES`),
   encerra a sessão com close **4008**. A tentativa nunca chega ao LLM.
+
+> Desde 11/09/2026 o guard **não é mais exclusivo do modo público**: as mesmas
+> proteções (PII, jailbreak, limite de tamanho, sanitização) rodam também no
+> `/ws/chat` autenticado. Ver `docs/seguranca-entrada.md`.
 
 ### 4. Auditoria mínima (LGPD)
 - `llm_audit` ganhou `is_anonymous BOOLEAN DEFAULT false`,
@@ -99,7 +103,8 @@ CORS_ALLOW_ORIGINS=http://localhost:5173,http://127.0.0.1:5173
 
 ## Testes
 
-- `tests/unit/test_public_guard.py` — PII (CPF/e-mail/telefone) e jailbreak.
+- `tests/unit/test_input_guard.py` — PII (CPF/e-mail/telefone), jailbreak nos dois
+  idiomas, ofuscação, sanitização e limite de tamanho.
 - `tests/unit/test_session_service.py` — emissão/validação do token anônimo,
   rejeição de token de nutriz logada, `hash_ip` sem IP em claro.
 - `tests/integration/test_ws_chat_public.py` — auth (4001), streaming, prompt
