@@ -1,6 +1,3 @@
-# Endpoint WebSocket de chat com a EVA.
-# Autenticacao via query string: ws://host/ws/chat?token=<jwt>
-
 import asyncio
 import json
 import logging
@@ -13,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
 from app.llm.provider import get_llm_provider
-from app.services import chat_service, public_guard
+from app.services import chat_service, input_guard
 from app.services.action_service import detect_action
 from app.services.auth_ws import authenticate_websocket
 from app.services.consent_service import has_valid_consent
@@ -34,14 +31,12 @@ from app.services.rate_limiter import rate_limiter
 from app.services.session_service import decode_anonymous_session, hash_ip
 from app.config import settings
 
-
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["chat"])
 
 
 def _client_ip(websocket: WebSocket) -> str:
-    # Atras de proxy reverso o IP real vem no X-Forwarded-For (primeiro da lista)
     forwarded = websocket.headers.get("x-forwarded-for")
     if forwarded:
         return forwarded.split(",")[0].strip()
@@ -66,17 +61,13 @@ async def websocket_chat(
     if user_id is None:
         return
 
-    # Staff (adm/nurse) nao usa a EVA: recusa no backend, nao apenas na UI.
-    # Usuario sem linha na tabela user segue permitido (mesma postura do
-    # perfil: em dev o espelho pode nao ter o registro; o chat degrada sem
-    # personalizacao em vez de bloquear a nutriz).
     with setup_timer.measure("t_role"):
         user_type = await get_user_type(db, user_id)
     if user_type in STAFF_USER_TYPES:
         await websocket.send_json({
             "type": "error",
             "code": "staff_not_allowed",
-            "message": "A EVA atende apenas nutrizes. Perfis administrativos nao tem acesso ao chat.",
+            "message": "A EVA atende apenas nutrizes. Perfis da equipe Lactare ainda nao tem acesso ao chat.",
         })
         await websocket.close(code=4403, reason="Staff role not allowed")
         return
@@ -115,12 +106,6 @@ async def websocket_chat(
         {"type": "conversation", "conversation_id": str(conversation.id)}
     )
 
-    # Do ponto em diante o turno usa SO este valor puro, nunca mais o objeto
-    # ORM. Motivo: as leituras opcionais abaixo (perfil, doacoes) degradam com
-    # rollback, e o rollback EXPIRA todos os objetos da sessao - tocar em
-    # conversation.id depois disso dispara um refresh sincrono que estoura
-    # MissingGreenlet e derruba o WebSocket, justamente a falha que a
-    # degradacao existe para evitar.
     conv_id = conversation.id
 
     with setup_timer.measure("t_profile"):
@@ -128,10 +113,6 @@ async def websocket_chat(
     if nutriz_profile is None:
         logger.warning(f"Perfil nao encontrado para user_id={user_id}, EVA seguira sem personalizacao")
 
-    # Contexto de doacao (etapa, agendamento, historico, local de coleta): lido
-    # UMA vez por conexao, como o perfil, e nunca por mensagem. Cada bloco
-    # degrada sozinho la dentro; aqui o try/except e a ultima rede: nenhuma
-    # falha na leitura pode derrubar o WebSocket.
     with setup_timer.measure("t_donations"):
         try:
             donation_context = await get_donation_context(db, user_id)
@@ -145,13 +126,11 @@ async def websocket_chat(
 
     setup_timer.log_summary(f"setup conexao user={user_id}")
 
-    # Provider resolvido uma vez por conexao (instancia cacheada no modulo)
     provider = get_llm_provider()
+    jailbreak_strikes = 0
 
     try:
         while True:
-            # JSON invalido ou payload que nao e objeto nao pode derrubar a
-            # conexao: responde erro estruturado e segue aguardando
             try:
                 data = await websocket.receive_json()
             except json.JSONDecodeError:
@@ -172,20 +151,42 @@ async def websocket_chat(
                 )
                 continue
 
+            if input_guard.exceeds_length(user_message):
+                await _stream_static_reply(websocket, input_guard.MESSAGE_TOO_LONG)
+                continue
+
+            user_message = input_guard.sanitize(user_message)
+            if not user_message:
+                await websocket.send_json(
+                    {"type": "error", "message": "Missing 'message' field"}
+                )
+                continue
+
+            if input_guard.contains_pii(user_message):
+                await _stream_static_reply(
+                    websocket, input_guard.PII_WARNING_LOGGED
+                )
+                continue
+
+            if input_guard.is_jailbreak_attempt(user_message):
+                jailbreak_strikes += 1
+                if jailbreak_strikes >= settings.ANON_MAX_JAILBREAK_STRIKES:
+                    await _stream_static_reply(
+                        websocket, input_guard.JAILBREAK_SESSION_ENDED
+                    )
+                    await websocket.close(code=4008, reason="Jailbreak limit")
+                    return
+                await _stream_static_reply(websocket, input_guard.JAILBREAK_WARNING)
+                continue
+
             turn_timer = PhaseTimer()
 
-            # Encode do embedding (CPU em thread) e busca do historico (I/O no
-            # banco) sao independentes: rodam em paralelo. Nao e possivel
-            # paralelizar duas queries na mesma AsyncSession, mas encode nao usa
-            # a sessao.
             with turn_timer.measure("t_history_e_embedding"):
                 history, query_embedding = await asyncio.gather(
                     chat_service.get_recent_messages(db, conv_id, limit=10),
                     embeddings_service.encode_async(user_message),
                 )
 
-            # top-3 (era top-4): menos tokens de input = primeiro token mais
-            # rapido no Groq, sem perda relevante de contexto no RAG
             rag_chunks = await search_chunks(
                 db,
                 user_message,
@@ -194,10 +195,6 @@ async def websocket_chat(
                 query_embedding=query_embedding,
             )
 
-            # Acao contextual por regras (nunca pelo LLM). Detectada ANTES de
-            # montar o prompt: quando ha acao, a resposta deve ser curta e
-            # apontar para o botao. Nutriz logada nao e anonima: signup/login
-            # nunca disparam.
             action = detect_action(user_message, is_anonymous=False)
 
             messages = build_messages_for_llm_with_rag(
@@ -224,9 +221,6 @@ async def websocket_chat(
             latency_ms = int((time.time() - start_time) * 1000)
             turn_timer.record("t_llm_total", latency_ms)
 
-            # Persistencia fora do caminho critico do PRIMEIRO token: grava
-            # depois de todos os chunks, mas ANTES do "done" - se o cliente
-            # desconectar apos o done, nada se perde (llm_audit e obrigatorio).
             with turn_timer.measure("t_persist_user_msg"):
                 await chat_service.save_message(
                     db, conv_id, "user", user_message
@@ -297,8 +291,6 @@ async def websocket_chat_public(
     session_id = payload.session_id
     ip_hash = hash_ip(_client_ip(websocket))
 
-    # Sem persistencia: a conversa vive apenas na memoria desta conexao. O
-    # frame conversation reusa o session_id para o front seguir o mesmo fluxo.
     await websocket.send_json({"type": "conversation", "conversation_id": session_id})
 
     provider = get_llm_provider()
@@ -327,21 +319,30 @@ async def websocket_chat_public(
                 )
                 continue
 
-            # PII: dado sensivel do visitante nunca chega ao LLM nem e auditado.
-            if public_guard.contains_pii(user_message):
-                await _stream_static_reply(websocket, public_guard.PII_WARNING)
+            if input_guard.exceeds_length(user_message):
+                await _stream_static_reply(websocket, input_guard.MESSAGE_TOO_LONG)
                 continue
 
-            # Anti-jailbreak: acumula strikes; ao 3o, encerra a sessao.
-            if public_guard.is_jailbreak_attempt(user_message):
+            user_message = input_guard.sanitize(user_message)
+            if not user_message:
+                await websocket.send_json(
+                    {"type": "error", "message": "Missing 'message' field"}
+                )
+                continue
+
+            if input_guard.contains_pii(user_message):
+                await _stream_static_reply(websocket, input_guard.PII_WARNING)
+                continue
+
+            if input_guard.is_jailbreak_attempt(user_message):
                 jailbreak_strikes += 1
                 if jailbreak_strikes >= settings.ANON_MAX_JAILBREAK_STRIKES:
                     await _stream_static_reply(
-                        websocket, public_guard.JAILBREAK_SESSION_ENDED
+                        websocket, input_guard.JAILBREAK_SESSION_ENDED
                     )
                     await websocket.close(code=4008, reason="Jailbreak limit")
                     return
-                await _stream_static_reply(websocket, public_guard.JAILBREAK_WARNING)
+                await _stream_static_reply(websocket, input_guard.JAILBREAK_WARNING)
                 continue
 
             allowed, reason = await rate_limiter.check_and_increment(ip_hash, session_id)
@@ -353,14 +354,10 @@ async def websocket_chat_public(
                 return
 
             query_embedding = await embeddings_service.encode_async(user_message)
-            # top-2 no modo publico: economia de tokens de input no free tier
             rag_chunks = await search_chunks(
                 db, user_message, top_k=2, query_embedding=query_embedding
             )
 
-            # Acao contextual por regras, detectada antes do prompt: com acao, a
-            # resposta e curta e aponta para o botao. Modo anonimo: signup/login
-            # podem disparar.
             action = detect_action(user_message, is_anonymous=True)
 
             messages = build_messages_for_public_llm(
@@ -377,7 +374,6 @@ async def websocket_chat_public(
 
             history.append({"role": "user", "content": user_message})
             history.append({"role": "assistant", "content": full_response})
-            # Memoria curta limitada: mesmas ultimas 10 mensagens do chat logado
             history[:] = history[-10:]
 
             chunks_used_audit = [
@@ -385,8 +381,6 @@ async def websocket_chat_public(
                 for c in rag_chunks
             ]
 
-            # Auditoria LGPD tambem no modo publico: sem user_id, com
-            # session_id e ip_hash. Sem persistir conversation/message.
             await chat_service.save_llm_audit(
                 db=db,
                 user_id=None,
@@ -423,8 +417,6 @@ async def websocket_chat_public(
 
 
 async def _stream_static_reply(websocket: WebSocket, text: str) -> None:
-    # Resposta canonica da EVA (guard-rail) no mesmo formato do streaming do LLM,
-    # para o front nao precisar de caminho especial.
     await websocket.send_json({"type": "chunk", "content": text})
     await websocket.send_json({"type": "done"})
 
