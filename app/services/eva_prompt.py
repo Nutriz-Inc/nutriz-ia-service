@@ -336,3 +336,173 @@ def _format_donations_as_context(context: DonationContext | None) -> str | None:
             '- Voce sabe a etapa do processo, nunca o desfecho: mesmo em "Exame de sangue", voce nao tem acesso a exames, sorologias nem a motivo de aprovacao ou recusa',
         ]
     )
+
+
+def _formatar_numero(valor: object) -> str:
+    if isinstance(valor, (int, float, Decimal)):
+        numero = float(valor)
+        if numero == int(numero):
+            return str(int(numero))
+        return f"{numero:.1f}".replace(".", ",")
+    return str(valor)
+
+
+def _format_dashboard_as_context(dados: dict | None) -> str | None:
+    if not dados:
+        return None
+
+    rotulos = [
+        ("total_milk_collected", "Leite captado no periodo (ml)"),
+        ("bottles_count", "Frascos recebidos"),
+        ("discarded_bottles_count", "Frascos descartados"),
+        ("bottles_utilization_rate", "Aproveitamento de frascos (0 a 1)"),
+        ("average_bottles_per_donor", "Media de frascos por doadora"),
+        ("average_mileage_per_route", "Media de km por rota"),
+        ("average_stops_per_route", "Media de paradas por rota"),
+        ("average_route_duration_hours", "Duracao media da rota (horas, limite 6)"),
+        ("average_service_time_hours", "Tempo medio de atendimento (horas)"),
+        ("donations_with_error", "Doacoes com erro"),
+        ("donor_recurrence_rate", "Recorrencia de doadoras (0 a 1)"),
+    ]
+
+    linhas = [
+        f"- {rotulo}: {_formatar_numero(dados[chave])}"
+        for chave, rotulo in rotulos
+        if dados.get(chave) is not None
+    ]
+
+    por_mes = dados.get("milk_collected_by_month")
+    if isinstance(por_mes, list) and por_mes:
+        serie = ", ".join(
+            f"{item.get('month')}: {_formatar_numero(item.get('total'))} ml"
+            for item in por_mes
+            if isinstance(item, dict)
+        )
+        linhas.append(f"- Leite por mes: {serie}")
+
+    por_etapa = dados.get("active_donations_by_step")
+    if isinstance(por_etapa, list) and por_etapa:
+        serie = ", ".join(
+            f"{item.get('step')}: {_formatar_numero(item.get('count'))}"
+            for item in por_etapa
+            if isinstance(item, dict)
+        )
+        linhas.append(f"- Doacoes ativas por etapa: {serie}")
+
+    if not linhas:
+        return None
+
+    corpo = "\n".join(linhas)
+    return (
+        "INDICADORES DA OPERACAO (agregados, do painel, lidos no inicio desta conversa):\n"
+        f"{corpo}\n"
+        "Estes numeros sao de toda a operacao, nunca de uma pessoa. "
+        "Nao ha nenhum dado individual disponivel para voce."
+    )
+
+
+def _format_jobs_as_context(
+    jobs: list[dict], nomes_de_etapa: dict[str, str] | None = None
+) -> str:
+    if not jobs:
+        return (
+            "AGENDAMENTOS ATRIBUIDOS A VOCE: nenhum agendamento pendente no momento. "
+            "Diga isso com clareza se perguntarem; nao invente agendamento."
+        )
+
+    nomes_de_etapa = nomes_de_etapa or {}
+    linhas = []
+    for indice, job in enumerate(jobs, start=1):
+        etapa = nomes_de_etapa.get(str(job.get("id_step")), "etapa nao identificada")
+        data = _format_date(job.get("date_set")) or "sem data marcada"
+        linhas.append(f"- {indice}. {etapa} - situacao: {job.get('status')} - {data}")
+
+    corpo = "\n".join(linhas)
+    return (
+        f"AGENDAMENTOS ATRIBUIDOS A VOCE ({len(jobs)} pendentes, lidos no inicio desta conversa):\n"
+        f"{corpo}\n"
+        "Voce so enxerga os agendamentos desta pessoa. Nao ha descricao clinica "
+        "nem dado de exame disponivel para voce."
+    )
+
+
+def _format_routes_as_context(
+    rotas: list[dict], paradas: list[dict] | None = None
+) -> str:
+    if not rotas:
+        return (
+            "SUA ROTA: nenhuma rota atribuida a voce no momento. "
+            "Diga isso com clareza se perguntarem; nao invente rota."
+        )
+
+    atual = rotas[0]
+    linhas = [
+        f"- Rota: {atual.get('name')}",
+        f"- Situacao: {atual.get('status')}",
+    ]
+    regiao = " - ".join(
+        parte for parte in (atual.get("city"), atual.get("neighborhood")) if parte
+    )
+    if regiao:
+        linhas.append(f"- Regiao: {regiao}")
+
+    inicio = _format_date(atual.get("date_start"))
+    if inicio:
+        linhas.append(f"- Iniciada em: {inicio}")
+    else:
+        linhas.append("- Ainda nao iniciada")
+
+    if atual.get("mileage") is not None:
+        linhas.append(f"- Km percorridos: {_formatar_numero(atual['mileage'])}")
+
+    if paradas:
+        pendentes = [p for p in paradas if p.get("status") != "done"]
+        linhas.append(f"- Paradas: {len(paradas)} no total, {len(pendentes)} pendentes")
+        for parada in sorted(paradas, key=lambda p: p.get("stop_order") or 0)[:6]:
+            endereco = parada.get("address") or {}
+            local = ", ".join(
+                parte
+                for parte in (
+                    endereco.get("street"),
+                    endereco.get("number"),
+                    endereco.get("neighborhood"),
+                )
+                if parte
+            )
+            linhas.append(
+                f"  - parada {parada.get('stop_order')}: {local or 'endereco nao informado'}"
+                f" - {parada.get('status')}"
+            )
+
+    outras = len(rotas) - 1
+    if outras > 0:
+        linhas.append(f"- Outras rotas suas no periodo: {outras}")
+
+    corpo = "\n".join(linhas)
+    return (
+        "SUA ROTA (lida no inicio desta conversa):\n"
+        f"{corpo}\n"
+        "Voce so enxerga a rota desta pessoa. Da nutriz, apenas o endereco da parada."
+    )
+
+
+def build_messages_for_staff(
+    system_prompt: str,
+    history: list[Message],
+    new_user_message: str,
+    chunks: list[ChunkSearchResult],
+    context_blocks: list[str] | None = None,
+) -> list[dict[str, str]]:
+    system_parts = [system_prompt]
+    for bloco in context_blocks or []:
+        if bloco:
+            system_parts.append(bloco)
+    system_parts.append(_format_chunks_as_context(chunks))
+
+    messages: list[dict[str, str]] = [
+        {"role": "system", "content": "\n\n".join(system_parts)}
+    ]
+    for msg in history:
+        messages.append({"role": msg.role, "content": msg.content})
+    messages.append({"role": "user", "content": new_user_message})
+    return messages

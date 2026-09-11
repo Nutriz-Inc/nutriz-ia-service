@@ -39,6 +39,9 @@ class Settings(BaseSettings):
     LOG_LEVEL: str = "INFO"
 
     # Modo publico (chat anonimo sem login)
+    BACKEND_API_URL: str = "http://localhost:3333"
+    BACKEND_API_TIMEOUT_SECONDS: float = 5.0
+
     ANON_SESSION_TTL_MINUTES: int = 30
     ANON_RATE_LIMIT_PER_IP_HOUR: int = 30
     ANON_RATE_LIMIT_PER_SESSION: int = 10

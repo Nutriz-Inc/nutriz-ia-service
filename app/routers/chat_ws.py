@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
 from app.llm.provider import get_llm_provider
-from app.services import chat_service, input_guard
+from app.services import backend_client, chat_service, eva_personas, input_guard
 from app.services.action_service import detect_action
 from app.services.auth_ws import authenticate_websocket
 from app.services.consent_service import has_valid_consent
@@ -19,10 +19,11 @@ from app.services.embeddings import embeddings_service
 from app.services.eva_prompt import (
     build_messages_for_llm_with_rag,
     build_messages_for_public_llm,
+    build_messages_for_staff,
 )
+from app.services.role_context_service import get_role_context
 from app.services.latency import PhaseTimer
 from app.services.profile_service import (
-    STAFF_USER_TYPES,
     get_nutriz_profile,
     get_user_type,
 )
@@ -63,25 +64,21 @@ async def websocket_chat(
 
     with setup_timer.measure("t_role"):
         user_type = await get_user_type(db, user_id)
-    if user_type in STAFF_USER_TYPES:
-        await websocket.send_json({
-            "type": "error",
-            "code": "staff_not_allowed",
-            "message": "A EVA atende apenas nutrizes. Perfis da equipe Lactare ainda nao tem acesso ao chat.",
-        })
-        await websocket.close(code=4403, reason="Staff role not allowed")
-        return
 
-    with setup_timer.measure("t_consent"):
-        has_consent = await has_valid_consent(db, user_id)
-    if not has_consent:
-        await websocket.send_json({
-            "type": "error",
-            "code": "lgpd_consent_required",
-            "message": "E necessario aceitar os termos de uso antes de iniciar o chat.",
-        })
-        await websocket.close(code=4003, reason="LGPD consent required")
-        return
+    prompt_do_papel = eva_personas.prompt_para_papel(user_type)
+    e_staff = prompt_do_papel is not None
+
+    if not e_staff:
+        with setup_timer.measure("t_consent"):
+            has_consent = await has_valid_consent(db, user_id)
+        if not has_consent:
+            await websocket.send_json({
+                "type": "error",
+                "code": "lgpd_consent_required",
+                "message": "E necessario aceitar os termos de uso antes de iniciar o chat.",
+            })
+            await websocket.close(code=4003, reason="LGPD consent required")
+            return
 
     try:
         conv_uuid = UUID(conversation_id) if conversation_id else None
@@ -108,21 +105,32 @@ async def websocket_chat(
 
     conv_id = conversation.id
 
-    with setup_timer.measure("t_profile"):
-        nutriz_profile = await get_nutriz_profile(db, user_id)
-    if nutriz_profile is None:
-        logger.warning(f"Perfil nao encontrado para user_id={user_id}, EVA seguira sem personalizacao")
+    nutriz_profile = None
+    donation_context = None
+    blocos_do_papel: list[str] = []
 
-    with setup_timer.measure("t_donations"):
-        try:
-            donation_context = await get_donation_context(db, user_id)
-        except Exception:
-            logger.exception(
-                f"Falha ao montar contexto de doacao para user_id={user_id}; "
-                "EVA seguira sem esses dados"
-            )
-            await db.rollback()
-            donation_context = None
+    if e_staff:
+        with setup_timer.measure("t_contexto_do_papel"):
+            blocos_do_papel = await get_role_context(db, user_type, user_id, token)
+        await websocket.send_json(
+            {"type": "mode", "mode": user_type, "label": eva_personas.ROTULO_DO_MODO[user_type]}
+        )
+    else:
+        with setup_timer.measure("t_profile"):
+            nutriz_profile = await get_nutriz_profile(db, user_id)
+        if nutriz_profile is None:
+            logger.warning(f"Perfil nao encontrado para user_id={user_id}, EVA seguira sem personalizacao")
+
+        with setup_timer.measure("t_donations"):
+            try:
+                donation_context = await get_donation_context(db, user_id)
+            except Exception:
+                logger.exception(
+                    f"Falha ao montar contexto de doacao para user_id={user_id}; "
+                    "EVA seguira sem esses dados"
+                )
+                await db.rollback()
+                donation_context = None
 
     setup_timer.log_summary(f"setup conexao user={user_id}")
 
@@ -195,16 +203,25 @@ async def websocket_chat(
                 query_embedding=query_embedding,
             )
 
-            action = detect_action(user_message, is_anonymous=False)
+            action = None if e_staff else detect_action(user_message, is_anonymous=False)
 
-            messages = build_messages_for_llm_with_rag(
-                history,
-                user_message,
-                rag_chunks,
-                profile=nutriz_profile,
-                donations=donation_context,
-                action_label=action.label if action else None,
-            )
+            if e_staff:
+                messages = build_messages_for_staff(
+                    prompt_do_papel,
+                    history,
+                    user_message,
+                    rag_chunks,
+                    context_blocks=blocos_do_papel,
+                )
+            else:
+                messages = build_messages_for_llm_with_rag(
+                    history,
+                    user_message,
+                    rag_chunks,
+                    profile=nutriz_profile,
+                    donations=donation_context,
+                    action_label=action.label if action else None,
+                )
 
             start_time = time.time()
             first_token_at: float | None = None
