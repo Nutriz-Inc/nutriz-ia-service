@@ -11,8 +11,10 @@ services:
     runtime: docker
     dockerfilePath: ./Dockerfile
     plan: free
-    # Ajuste a branch que dispara auto-deploy conforme o fluxo do time.
-    branch: develop
+    # O painel do Render e a fonte da verdade deste servico: o blueprint nao
+    # esta sincronizado (variavel declarada aqui nao aparece la). A branch
+    # abaixo reflete o que o painel realmente faz -- deploy a partir da main.
+    branch: main
     healthCheckPath: /health
     envVars:
       # --- Secrets / especificos do ambiente (colar no painel) ---
