@@ -1,7 +1,3 @@
-# Servico de consulta consolidada do perfil da nutriz.
-# Faz join entre as tabelas espelhadas do backend Go (user, user_baby, address).
-# Tabelas sao READ-ONLY no python - nunca escreve, apenas le.
-
 import logging
 from datetime import datetime, timezone
 
@@ -11,13 +7,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models import Address, User, UserBaby
 from app.schemas.profile import AddressProfile, BabyProfile, NutrizProfile
 
-
 logger = logging.getLogger(__name__)
 
-# Papeis de staff Lactare: usam painel administrativo, nunca o chat da EVA.
-# O gate de UI no front nao basta - um token valido permitiria conectar
-# direto no WebSocket, entao o bloqueio precisa existir no backend.
-STAFF_USER_TYPES = frozenset({"adm", "nurse"})
+STAFF_USER_TYPES = frozenset({"adm", "nurse", "driver"})
 
 
 async def get_user_type(db: AsyncSession, id_user: str) -> str | None:
@@ -46,12 +38,6 @@ async def get_nutriz_profile(
     db: AsyncSession,
     id_user: str,
 ) -> NutrizProfile | None:
-    # O perfil e OPCIONAL: personaliza a resposta, mas nunca deve derrubar o
-    # chat. Qualquer falha na leitura (ex.: schema espelhado divergente do banco
-    # real do Go, indisponibilidade, etc.) degrada para sem-personalizacao. O
-    # rollback e essencial: sem ele a sessao fica em transacao abortada e as
-    # queries seguintes do mesmo turno (historico, RAG, persistencia) tambem
-    # falhariam - a falha ao ler UMA tabela mataria o chat inteiro.
     try:
         user_result = await db.execute(
             select(User).where(User.id_user == id_user)
