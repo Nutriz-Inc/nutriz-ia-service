@@ -94,28 +94,33 @@ class TestAuthLgpd:
         assert count.scalar_one() == 0
 
 
-class TestStaffBloqueado:
-    STAFF_IDS = {
+class TestPapeisDaEquipe:
+    IDS = {
         "adm": "44444444-4444-4444-4444-444444444444",
         "nurse": "55555555-5555-5555-5555-555555555555",
         "driver": "66666666-6666-6666-6666-666666666666",
     }
     SUFIXO_CPF = {"adm": "1", "nurse": "2", "driver": "3"}
+    ROTULOS = {
+        "adm": "Modo operacional",
+        "nurse": "Modo enfermagem",
+        "driver": "Modo motorista",
+    }
 
-    async def _seed_staff(self, db_session, user_type: str) -> str:
+    async def _seed(self, db_session, user_type: str) -> str:
         from datetime import datetime, timezone
 
-        staff_id = self.STAFF_IDS[user_type]
+        id_user = self.IDS[user_type]
         now = datetime.now(timezone.utc).replace(tzinfo=None)
         await db_session.execute(
             text(
                 'INSERT INTO "user" (id_user, type, name, cpf, birth_date, '
                 "phone_number, email, password, created_at, created_by) VALUES "
-                "(:id, :type, 'Staff Teste', :cpf, :birth, :phone, :email, "
+                "(:id, :type, 'Equipe Teste', :cpf, :birth, :phone, :email, "
                 "'hash', :now, :id)"
             ),
             {
-                "id": staff_id,
+                "id": id_user,
                 "type": user_type,
                 "cpf": f"999999999{self.SUFIXO_CPF[user_type]}0",
                 "birth": now,
@@ -125,33 +130,135 @@ class TestStaffBloqueado:
             },
         )
         await db_session.commit()
-        return staff_id
+        return id_user
 
     @pytest.mark.parametrize("user_type", ["adm", "nurse", "driver"])
-    async def test_staff_recebe_erro_e_fecha_4403(
+    async def test_equipe_conecta_e_recebe_o_modo(
         self, app_with_overrides, db_session, user_type
     ):
-        staff_id = await self._seed_staff(db_session, user_type)
-        token = make_token(user_id=staff_id)
+        id_user = await self._seed(db_session, user_type)
+        token = make_token(user_id=id_user)
         with TestClient(app_with_overrides) as client:
             with client.websocket_connect(f"/ws/chat?token={token}") as ws:
-                event = ws.receive_json()
-                assert event["type"] == "error"
-                assert event["code"] == "staff_not_allowed"
-                with pytest.raises(WebSocketDisconnect) as exc:
-                    ws.receive_json()
-                assert exc.value.code == 4403
+                assert ws.receive_json()["type"] == "conversation"
+                modo = ws.receive_json()
+                assert modo["type"] == "mode"
+                assert modo["mode"] == user_type
+                assert modo["label"] == self.ROTULOS[user_type]
 
-        count = await db_session.execute(text("SELECT count(*) FROM conversations"))
-        assert count.scalar_one() == 0
-
-    def test_nutriz_common_segue_permitida(
-        self, app_with_overrides, seed_consent, valid_token
+    @pytest.mark.parametrize("user_type", ["adm", "nurse", "driver"])
+    async def test_equipe_nao_precisa_de_consent(
+        self, app_with_overrides, db_session, user_type, fake_provider: FakeProvider
     ):
+        id_user = await self._seed(db_session, user_type)
+        token = make_token(user_id=id_user)
         with TestClient(app_with_overrides) as client:
-            with client.websocket_connect(f"/ws/chat?token={valid_token}") as ws:
-                event = ws.receive_json()
-                assert event["type"] == "conversation"
+            with client.websocket_connect(f"/ws/chat?token={token}") as ws:
+                ws.receive_json()
+                ws.receive_json()
+                ws.send_json({"message": "bom dia"})
+                assert _collect_turn(ws) == "Ola, sou a EVA de teste."
+
+    @pytest.mark.parametrize(
+        "user_type,marca",
+        [
+            ("adm", "modo operacional"),
+            ("nurse", "modo enfermagem"),
+            ("driver", "modo motorista"),
+        ],
+    )
+    async def test_cada_papel_recebe_a_sua_persona(
+        self, app_with_overrides, db_session, user_type, marca, fake_provider: FakeProvider
+    ):
+        id_user = await self._seed(db_session, user_type)
+        token = make_token(user_id=id_user)
+        with TestClient(app_with_overrides) as client:
+            with client.websocket_connect(f"/ws/chat?token={token}") as ws:
+                ws.receive_json()
+                ws.receive_json()
+                ws.send_json({"message": "bom dia"})
+                _collect_turn(ws)
+
+        system_prompt = fake_provider.calls[-1][0]["content"].lower()
+        assert marca in system_prompt
+        assert "perfil da nutriz" not in system_prompt
+        assert "doacoes da nutriz" not in system_prompt
+
+    async def test_backend_fora_do_ar_nao_derruba_a_conexao(
+        self, app_with_overrides, db_session, fake_provider: FakeProvider
+    ):
+        id_user = await self._seed(db_session, "driver")
+        token = make_token(user_id=id_user)
+        with TestClient(app_with_overrides) as client:
+            with client.websocket_connect(f"/ws/chat?token={token}") as ws:
+                ws.receive_json()
+                ws.receive_json()
+                ws.send_json({"message": "qual a minha rota?"})
+                assert _collect_turn(ws) == "Ola, sou a EVA de teste."
+
+    async def test_contexto_do_motorista_entra_no_prompt(
+        self, app_with_overrides, db_session, monkeypatch, fake_provider: FakeProvider
+    ):
+        from app.services import backend_client
+
+        async def rotas(token, id_driver, page_size=5):
+            return [
+                {
+                    "id_route": "route-1",
+                    "name": "Coletas zona sul",
+                    "status": "in_progress",
+                    "city": "Sao Paulo",
+                }
+            ]
+
+        async def paradas(token, id_route):
+            return [
+                {
+                    "id_route_donation_step": "stop-1",
+                    "stop_order": 1,
+                    "status": "pending",
+                    "address": {"street": "Rua Loefgren", "number": "101"},
+                }
+            ]
+
+        monkeypatch.setattr(backend_client, "fetch_routes", rotas)
+        monkeypatch.setattr(backend_client, "fetch_route_stops", paradas)
+
+        id_user = await self._seed(db_session, "driver")
+        token = make_token(user_id=id_user)
+        with TestClient(app_with_overrides) as client:
+            with client.websocket_connect(f"/ws/chat?token={token}") as ws:
+                ws.receive_json()
+                ws.receive_json()
+                ws.send_json({"message": "qual a minha rota?"})
+                _collect_turn(ws)
+
+        system_prompt = fake_provider.calls[-1][0]["content"]
+        assert "Coletas zona sul" in system_prompt
+        assert "Rua Loefgren" in system_prompt
+
+    async def test_adm_recebe_agregado_e_a_regra_de_recusa(
+        self, app_with_overrides, db_session, monkeypatch, fake_provider: FakeProvider
+    ):
+        from app.services import backend_client
+
+        async def dashboard(token):
+            return {"total_milk_collected": 12450, "bottles_count": 320}
+
+        monkeypatch.setattr(backend_client, "fetch_dashboard", dashboard)
+
+        id_user = await self._seed(db_session, "adm")
+        token = make_token(user_id=id_user)
+        with TestClient(app_with_overrides) as client:
+            with client.websocket_connect(f"/ws/chat?token={token}") as ws:
+                ws.receive_json()
+                ws.receive_json()
+                ws.send_json({"message": "quanto de leite este mes?"})
+                _collect_turn(ws)
+
+        system_prompt = fake_provider.calls[-1][0]["content"]
+        assert "12450" in system_prompt
+        assert "consulte o perfil pelo painel" in system_prompt.lower()
 
 
 class TestFrameDeAcaoAutenticado:

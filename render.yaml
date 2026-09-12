@@ -27,6 +27,9 @@ services:
       - key: CORS_ALLOW_ORIGINS    # front confirmado: https://web-nutriz.vercel.app
         sync: false
 
+      - key: BACKEND_API_URL       # API do Go, consultada com o JWT do usuario
+        value: https://nutriz-backend-service.onrender.com
+
       # --- Configuracao fixa ---
       - key: LLM_PROVIDER
         value: groq
