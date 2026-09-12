@@ -25,6 +25,12 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     await asyncio.to_thread(embeddings_service.encode, "warmup")
     elapsed_ms = (time.perf_counter() - start) * 1000
     logger.info(f"Modelo de embeddings pre-aquecido em {elapsed_ms:.0f}ms")
+    logger.info(f"API do backend configurada em {settings.BACKEND_API_URL}")
+    if settings.APP_ENV != "development" and "localhost" in settings.BACKEND_API_URL:
+        logger.error(
+            "BACKEND_API_URL aponta para localhost fora de desenvolvimento: "
+            "o contexto de adm, enfermeira e motorista vai degradar para vazio"
+        )
     yield
 
 

@@ -28,7 +28,7 @@ services:
         sync: false
 
       - key: BACKEND_API_URL       # API do Go, consultada com o JWT do usuario
-        sync: false
+        value: https://nutriz-backend-service.onrender.com
 
       # --- Configuracao fixa ---
       - key: LLM_PROVIDER
