@@ -18,7 +18,32 @@ async def test_health(app_with_overrides):
     async with _client(app_with_overrides) as client:
         response = await client.get("/health")
     assert response.status_code == 200
-    assert response.json() == {"status": "ok", "service": "nutriz-ia-service"}
+    corpo = response.json()
+    assert corpo["status"] == "ok"
+    assert corpo["service"] == "nutriz-ia-service"
+    assert corpo["backend_api"] in ("local", "configurado")
+
+
+async def test_health_denuncia_backend_apontando_para_localhost(
+    app_with_overrides, monkeypatch
+):
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "BACKEND_API_URL", "http://localhost:3333")
+    async with _client(app_with_overrides) as client:
+        response = await client.get("/health")
+    assert response.json()["backend_api"] == "local"
+
+
+async def test_health_confirma_backend_configurado(app_with_overrides, monkeypatch):
+    from app.config import settings
+
+    monkeypatch.setattr(
+        settings, "BACKEND_API_URL", "https://nutriz-backend-service.onrender.com"
+    )
+    async with _client(app_with_overrides) as client:
+        response = await client.get("/health")
+    assert response.json()["backend_api"] == "configurado"
 
 
 async def test_me_retorna_user_id(app_with_overrides, valid_token, seed_user):
