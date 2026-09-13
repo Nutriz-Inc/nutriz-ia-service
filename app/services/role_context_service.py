@@ -1,4 +1,6 @@
+import asyncio
 import logging
+from datetime import date
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -7,6 +9,7 @@ from app.services.eva_prompt import (
     _format_dashboard_as_context,
     _format_jobs_as_context,
     _format_routes_as_context,
+    rota_em_foco,
 )
 from app.services.step_catalog import nomes_de_etapa
 
@@ -25,17 +28,38 @@ async def _contexto_do_adm(token: str) -> list[str]:
 
 
 async def _contexto_da_enfermeira(db: AsyncSession, token: str) -> list[str]:
-    jobs = await backend_client.fetch_jobs(token)
+    hoje = date.today().isoformat()
+    pendentes, do_dia = await asyncio.gather(
+        backend_client.fetch_jobs(token, status="pending"),
+        backend_client.fetch_jobs(token, date_set=hoje),
+    )
+
+    # Sem os de hoje, um agendamento concluido hoje de manha simplesmente nao
+    # existiria para a EVA e ela responderia como se ainda estivesse pendente.
+    jobs: list[dict] = []
+    vistos: set[str] = set()
+    for job in [*do_dia, *pendentes]:
+        chave = str(job.get("id_job"))
+        if chave in vistos:
+            continue
+        vistos.add(chave)
+        jobs.append(job)
+
     etapas = await nomes_de_etapa(db, [str(job.get("id_step")) for job in jobs])
     return [_format_jobs_as_context(jobs, etapas)]
 
 
 async def _contexto_do_motorista(token: str, user_id: str) -> list[str]:
     rotas = await backend_client.fetch_routes(token, user_id)
+    foco = rota_em_foco(rotas)
+
     paradas: list[dict] = []
-    if rotas:
-        paradas = await backend_client.fetch_route_stops(token, str(rotas[0]["id_route"]))
-    return [_format_routes_as_context(rotas, paradas)]
+    if foco is not None:
+        paradas = await backend_client.fetch_route_stops(
+            token, str(foco.get("id_route"))
+        )
+
+    return [_format_routes_as_context(rotas, foco, paradas)]
 
 
 async def get_role_context(

@@ -329,18 +329,21 @@ class TestContextoDosPapeisDaEquipe:
     def test_sem_jobs_diz_que_nao_ha(self):
         from app.services.eva_prompt import _format_jobs_as_context
 
-        assert "nenhum agendamento pendente" in _format_jobs_as_context([])
+        assert "nenhum agendamento encontrado" in _format_jobs_as_context([])
 
     def test_rota_em_andamento_traz_o_tempo_contra_o_limite(self):
         from datetime import datetime, timedelta, timezone
 
-        from app.services.eva_prompt import _format_routes_as_context
+        from app.services.eva_prompt import (
+            _format_routes_as_context,
+            rota_em_foco,
+        )
 
         inicio = (datetime.now(timezone.utc) - timedelta(hours=5, minutes=30)).isoformat()
-        bloco = _format_routes_as_context(
-            [{"id_route": "r1", "name": "Coletas zona sul", "status": "in_progress", "date_start": inicio}],
-            [],
-        )
+        rotas = [
+            {"id_route": "r1", "name": "Coletas zona sul", "status": "in_progress", "date_start": inicio}
+        ]
+        bloco = _format_routes_as_context(rotas, rota_em_foco(rotas), [])
 
         assert "Coletas zona sul" in bloco
         assert "Restam 0h2" in bloco or "Restam 0h3" in bloco
@@ -349,28 +352,35 @@ class TestContextoDosPapeisDaEquipe:
     def test_rota_estourada_avisa_que_passou(self):
         from datetime import datetime, timedelta, timezone
 
-        from app.services.eva_prompt import _format_routes_as_context
+        from app.services.eva_prompt import (
+            _format_routes_as_context,
+            rota_em_foco,
+        )
 
         inicio = (datetime.now(timezone.utc) - timedelta(hours=7)).isoformat()
-        bloco = _format_routes_as_context(
-            [{"id_route": "r1", "name": "Rota", "status": "in_progress", "date_start": inicio}], []
-        )
+        rotas = [{"id_route": "r1", "name": "Rota", "status": "in_progress", "date_start": inicio}]
+        bloco = _format_routes_as_context(rotas, rota_em_foco(rotas), [])
 
         assert "JA PASSOU do limite" in bloco
 
     def test_rota_nao_iniciada_diz_que_o_limite_nao_comecou(self):
-        from app.services.eva_prompt import _format_routes_as_context
-
-        bloco = _format_routes_as_context(
-            [{"id_route": "r1", "name": "Rota", "status": "pending"}], []
+        from app.services.eva_prompt import (
+            _format_routes_as_context,
+            rota_em_foco,
         )
 
-        assert "ainda nao comecou a contar" in bloco
+        rotas = [{"id_route": "r1", "name": "Rota", "status": "pending"}]
+        bloco = _format_routes_as_context(rotas, rota_em_foco(rotas), [])
+
+        assert "so comeca a contar" in bloco
 
     def test_sem_rota_diz_que_nao_ha(self):
-        from app.services.eva_prompt import _format_routes_as_context
+        from app.services.eva_prompt import (
+            _format_routes_as_context,
+            rota_em_foco,
+        )
 
-        assert "nenhuma rota atribuida" in _format_routes_as_context([], [])
+        assert "nenhuma rota atribuida" in _format_routes_as_context([], None, [])
 
     def test_dashboard_vazio_devolve_none(self):
         from app.services.eva_prompt import _format_dashboard_as_context
@@ -388,3 +398,95 @@ class TestContextoDosPapeisDaEquipe:
         assert "12450" in bloco
         assert "5,4" in bloco
         assert "nunca de uma pessoa" in bloco
+
+
+class TestSituacaoRealDaRota:
+    """Regressao do bug relatado em producao: a EVA dizia que a ultima rota,
+    ja concluida, ainda estava em andamento.
+
+    A listagem do backend vem ordenada por date_set DESC, entao a rota mais
+    recente costuma ser justamente a que acabou de ser encerrada. O codigo
+    antigo pegava rotas[0] as cegas e a rotulava como "SUA ROTA".
+    """
+
+    ROTA_CONCLUIDA = {
+        "id_route": "r3",
+        "name": "Zona Sul",
+        "status": "done",
+        "date_set": "2026-09-12T08:00:00Z",
+        "date_start": "2026-09-12T08:10:00Z",
+        "date_end": "2026-09-12T12:30:00Z",
+    }
+
+    def test_rota_concluida_nunca_e_a_rota_em_foco(self):
+        from app.services.eva_prompt import rota_em_foco
+
+        assert rota_em_foco([self.ROTA_CONCLUIDA]) is None
+
+    def test_rota_cancelada_nunca_e_a_rota_em_foco(self):
+        from app.services.eva_prompt import rota_em_foco
+
+        cancelada = {**self.ROTA_CONCLUIDA, "status": "canceled"}
+        assert rota_em_foco([cancelada]) is None
+
+    def test_so_com_rota_encerrada_diz_que_nao_ha_rota_em_andamento(self):
+        from app.services.eva_prompt import _format_routes_as_context, rota_em_foco
+
+        rotas = [self.ROTA_CONCLUIDA]
+        bloco = _format_routes_as_context(rotas, rota_em_foco(rotas), [])
+
+        assert "NAO tem nenhuma rota em andamento" in bloco
+        assert "JA CONCLUIDA" in bloco
+
+    def test_rota_encerrada_nao_recebe_contagem_das_6_horas(self):
+        from app.services.eva_prompt import _format_routes_as_context, rota_em_foco
+
+        rotas = [self.ROTA_CONCLUIDA]
+        bloco = _format_routes_as_context(rotas, rota_em_foco(rotas), [])
+
+        assert "Restam" not in bloco
+        assert "JA PASSOU do limite" not in bloco
+
+    def test_enum_cru_do_banco_nunca_chega_ao_modelo(self):
+        from app.services.eva_prompt import _format_routes_as_context, rota_em_foco
+
+        rotas = [self.ROTA_CONCLUIDA, {"id_route": "r4", "status": "in_progress"}]
+        bloco = _format_routes_as_context(rotas, rota_em_foco(rotas), [])
+
+        for enum in ("in_progress", "; done", ": done", "canceled"):
+            assert enum not in bloco
+
+    def test_prefere_a_rota_em_andamento_sobre_a_mais_recente(self):
+        from app.services.eva_prompt import rota_em_foco
+
+        rotas = [
+            self.ROTA_CONCLUIDA,
+            {"id_route": "rA", "status": "in_progress", "date_set": "2026-09-11T07:00:00Z"},
+        ]
+
+        assert rota_em_foco(rotas)["id_route"] == "rA"
+
+    def test_sem_rota_ativa_aponta_a_agendada_mais_proxima(self):
+        from app.services.eva_prompt import rota_em_foco
+
+        rotas = [
+            {"id_route": "rB", "status": "pending", "date_set": "2026-09-20T07:00:00Z"},
+            {"id_route": "rA", "status": "pending", "date_set": "2026-09-14T07:00:00Z"},
+        ]
+
+        assert rota_em_foco(rotas)["id_route"] == "rA"
+
+    def test_job_concluido_nao_e_apresentado_como_pendente(self):
+        from app.services.eva_prompt import _format_jobs_as_context
+
+        bloco = _format_jobs_as_context(
+            [
+                {"id_job": "j1", "id_step": "s1", "status": "done"},
+                {"id_job": "j2", "id_step": "s1", "status": "pending"},
+            ],
+            {"s1": "Coletar leite"},
+        )
+
+        assert "ja concluido" in bloco
+        assert "1 pendente," in bloco
+        assert "status: done" not in bloco

@@ -203,7 +203,9 @@ async def websocket_chat(
                 query_embedding=query_embedding,
             )
 
-            action = None if e_staff else detect_action(user_message, is_anonymous=False)
+            action = detect_action(
+                user_message, is_anonymous=False, user_type=user_type
+            )
 
             if e_staff:
                 messages = build_messages_for_staff(

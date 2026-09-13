@@ -98,7 +98,9 @@ class TestJobs:
         assert "name" not in jobs[0]
         assert "user_common_name" not in jobs[0]
 
-    async def test_pede_somente_os_pendentes(self):
+    async def test_sem_filtro_traz_a_situacao_real_de_cada_job(self):
+        # Antes a busca fixava status=pending, entao um agendamento concluido
+        # hoje sumia do contexto e a EVA o descrevia como ainda pendente.
         capturado = {}
 
         def handler(request: httpx.Request) -> httpx.Response:
@@ -108,7 +110,21 @@ class TestJobs:
         monta_cliente(handler)
         await backend_client.fetch_jobs("tok")
 
+        assert capturado["status"] is None
+
+    async def test_repassa_status_e_data_quando_pedidos(self):
+        capturado = {}
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            capturado["status"] = request.url.params.get("status")
+            capturado["date_set"] = request.url.params.get("date_set")
+            return httpx.Response(200, json={"data": []})
+
+        monta_cliente(handler)
+        await backend_client.fetch_jobs("tok", status="pending", date_set="2026-09-13")
+
         assert capturado["status"] == "pending"
+        assert capturado["date_set"] == "2026-09-13"
 
     async def test_resposta_sem_data_devolve_lista_vazia(self):
         def handler(request: httpx.Request) -> httpx.Response:
