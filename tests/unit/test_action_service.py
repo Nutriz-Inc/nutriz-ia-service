@@ -129,7 +129,7 @@ class TestNavegacaoParaTelas:
         action = detect_action("quero ir para minhas doações", is_anonymous=False)
         assert action is not None
         assert action.slug == "my_donations"
-        assert action.label == "Ver minhas doacoes"
+        assert action.label == "Ver minhas doações"
 
     def test_minhas_doacoes_com_outro_verbo(self):
         assert (
