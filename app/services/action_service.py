@@ -35,6 +35,11 @@ class _ActionRule:
     authenticated_only: bool = False
     # Se algum destes casar, a regra e vetada (negacoes / falso positivo).
     blockers: list[re.Pattern[str]] = field(default_factory=list)
+    # Papeis da equipe que enxergam a regra. Regra com este campo preenchido e
+    # exclusiva desses papeis; regra sem ele nunca aparece para a equipe (as
+    # telas de nutriz nao existem no menu de quem e adm, enfermagem ou
+    # motorista).
+    user_types: frozenset[str] | None = None
 
 
 def _normalize(text: str) -> str:
@@ -74,9 +79,34 @@ def _navegacao(*alvos: str) -> list[str]:
     return padroes
 
 
+STAFF_USER_TYPES = frozenset({"adm", "nurse", "driver"})
+
+
 # Catalogo em ORDEM DE PRIORIDADE (primeiro = maior prioridade).
 # Padroes sao avaliados sobre o texto ja normalizado (minusculo, sem acento).
 ACTION_RULES: list[_ActionRule] = [
+    _ActionRule(
+        slug="dashboard_report",
+        label="Gerar relatório",
+        user_types=frozenset({"adm"}),
+        patterns=_compile(
+            [
+                r"\b(?:gerar?|emitir?|emite|criar?|cria|montar?|monta|extrair|"
+                r"exportar?|baixar?|imprimir?|tirar?)\b[^.?!]{0,24}\brelatorio\b",
+                r"\brelatorio\b[^.?!]{0,24}\b(?:dashboard|painel|indicadores|"
+                r"operacao|periodo|mes|metricas)\b",
+                r"\b(?:quero|queria|preciso|pode|consegue|da para|teria como)\b"
+                r"[^.?!]{0,24}\brelatorio\b",
+                r"\brelatorio\b[^.?!]{0,16}\b(?:pdf|impress|a4|impressao)\b",
+            ]
+        ),
+        blockers=_compile(
+            [
+                r"\bnao (?:quero|preciso|precisa|da para|consigo)\b[^.?!]{0,20}relatorio",
+                r"\brelatorio (?:de|do) (?:exame|laudo|sorologia)",
+            ]
+        ),
+    ),
     _ActionRule(
         slug="signup",
         label="Criar conta",
@@ -253,21 +283,34 @@ ACTION_RULES: list[_ActionRule] = [
 ]
 
 
-def detect_action(user_message: str, is_anonymous: bool) -> EvaAction | None:
+def detect_action(
+    user_message: str,
+    is_anonymous: bool,
+    user_type: str | None = None,
+) -> EvaAction | None:
     """Retorna a acao de maior prioridade que casa com a pergunta, ou None.
 
-    is_anonymous controla as regras anonymous_only (signup).
+    is_anonymous controla as regras anonymous_only (signup). user_type restringe
+    o catalogo para quem e da equipe: quem e adm, enfermagem ou motorista so
+    enxerga regras declaradas para o seu papel.
     """
     if not user_message:
         return None
 
+    e_staff = user_type in STAFF_USER_TYPES
     text = _normalize(user_message)
 
     for rule in ACTION_RULES:
-        if rule.anonymous_only and not is_anonymous:
-            continue
-        if rule.authenticated_only and is_anonymous:
-            continue
+        if e_staff:
+            if not rule.user_types or user_type not in rule.user_types:
+                continue
+        else:
+            if rule.user_types:
+                continue
+            if rule.anonymous_only and not is_anonymous:
+                continue
+            if rule.authenticated_only and is_anonymous:
+                continue
         if any(blocker.search(text) for blocker in rule.blockers):
             continue
         if any(pattern.search(text) for pattern in rule.patterns):

@@ -114,13 +114,20 @@ async def fetch_dashboard(token: str) -> dict[str, Any] | None:
     return _somente(dados, CAMPOS_DASHBOARD)
 
 
-async def fetch_jobs(token: str, page_size: int = 10) -> list[dict[str, Any]]:
+async def fetch_jobs(
+    token: str,
+    page_size: int = 10,
+    status: str | None = None,
+    date_set: str | None = None,
+) -> list[dict[str, Any]]:
+    params: dict[str, Any] = {"page": 1, "page_size": page_size}
+    if status:
+        params["status"] = status
+    if date_set:
+        params["date_set"] = date_set
+
     try:
-        dados = await _get(
-            "/internal/job",
-            token,
-            params={"page": 1, "page_size": page_size, "status": "pending"},
-        )
+        dados = await _get("/internal/job", token, params=params)
     except httpx.HTTPStatusError as e:
         logger.warning(f"Jobs indisponiveis para a EVA: HTTP {e.response.status_code}")
         return []
@@ -136,7 +143,7 @@ async def fetch_jobs(token: str, page_size: int = 10) -> list[dict[str, Any]]:
 
 
 async def fetch_routes(
-    token: str, id_driver: str, page_size: int = 5
+    token: str, id_driver: str, page_size: int = 10
 ) -> list[dict[str, Any]]:
     try:
         dados = await _get(

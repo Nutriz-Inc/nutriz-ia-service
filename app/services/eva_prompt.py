@@ -412,12 +412,40 @@ def _format_dashboard_as_context(dados: dict | None) -> str | None:
     )
 
 
+# A situacao vem do banco em ingles (enum do backend). Traduzir aqui, e nao
+# deixar a string crua chegar ao modelo, e o que impede a EVA de descrever uma
+# rota ja concluida como se ainda estivesse em andamento.
+SITUACAO_DA_ROTA = {
+    "pending": "agendada, ainda nao iniciada",
+    "in_progress": "EM ANDAMENTO agora",
+    "done": "JA CONCLUIDA",
+    "canceled": "CANCELADA",
+}
+
+SITUACAO_DO_JOB = {
+    "pending": "pendente",
+    "done": "ja concluido",
+    "failed": "nao concluido",
+}
+
+SITUACAO_DA_PARADA = {
+    "pending": "pendente",
+    "done": "concluida",
+    "failed": "nao concluida",
+}
+
+
+def _situacao(valor: object, catalogo: dict[str, str]) -> str:
+    chave = str(valor) if valor is not None else ""
+    return catalogo.get(chave, f"situacao nao reconhecida ({chave or 'sem valor'})")
+
+
 def _format_jobs_as_context(
     jobs: list[dict], nomes_de_etapa: dict[str, str] | None = None
 ) -> str:
     if not jobs:
         return (
-            "AGENDAMENTOS ATRIBUIDOS A VOCE: nenhum agendamento pendente no momento. "
+            "AGENDAMENTOS ATRIBUIDOS A VOCE: nenhum agendamento encontrado. "
             "Diga isso com clareza se perguntarem; nao invente agendamento."
         )
 
@@ -426,16 +454,26 @@ def _format_jobs_as_context(
     for indice, job in enumerate(jobs, start=1):
         etapa = nomes_de_etapa.get(str(job.get("id_step")), "etapa nao identificada")
         data = _format_date(_data_da_api(job.get("date_set"))) or "sem data marcada"
-        linhas.append(f"- {indice}. {etapa} - situacao: {job.get('status')} - {data}")
+        situacao = _situacao(job.get("status"), SITUACAO_DO_JOB)
+        linhas.append(f"- {indice}. {etapa} - {situacao} - marcado para {data}")
 
-    corpo = "\n".join(linhas)
+    pendentes = sum(1 for job in jobs if job.get("status") == "pending")
+    corpo = NOVA_LINHA.join(linhas)
     return (
-        f"AGENDAMENTOS ATRIBUIDOS A VOCE ({len(jobs)} pendentes, lidos no inicio desta conversa):\n"
-        f"{corpo}\n"
-        "Voce so enxerga os agendamentos desta pessoa. Nao ha descricao clinica "
+        f"AGENDAMENTOS ATRIBUIDOS A VOCE ({len(jobs)} no total, {pendentes} "
+        f"{'pendente' if pendentes == 1 else 'pendentes'}, "
+        "lidos no inicio desta conversa):"
+        + NOVA_LINHA
+        + corpo
+        + NOVA_LINHA
+        + "A situacao de cada um acima e a que esta no banco de dados agora. "
+        "Responda exatamente a situacao indicada: nunca chame de pendente um "
+        "agendamento ja concluido, nem o contrario."
+        + NOVA_LINHA
+        + "Voce so enxerga os agendamentos desta pessoa. Nao ha descricao clinica "
         "nem dado de exame disponivel para voce."
     )
-
+NOVA_LINHA = chr(10)
 
 LIMITE_DA_ROTA_EM_HORAS = 6
 
@@ -459,68 +497,153 @@ def _tempo_contra_o_limite(inicio: datetime, fim: datetime | None) -> str:
     )
 
 
+def _rotas_por_situacao(rotas: list[dict]) -> dict[str, list[dict]]:
+    grupos: dict[str, list[dict]] = {
+        "in_progress": [],
+        "pending": [],
+        "done": [],
+        "canceled": [],
+        "outras": [],
+    }
+    for rota in rotas:
+        chave = str(rota.get("status") or "")
+        grupos.get(chave, grupos["outras"]).append(rota)
+    return grupos
+
+
+def _chave_de_data(rota: dict) -> datetime:
+    data = _data_da_api(rota.get("date_set"))
+    return data or datetime.max.replace(tzinfo=None)
+
+
+def rota_em_foco(rotas: list[dict]) -> dict | None:
+    """A rota que a pessoa esta dirigindo agora, ou a proxima agendada.
+
+    Nunca uma rota concluida ou cancelada: era exatamente isso que fazia a EVA
+    falar de uma rota encerrada como se estivesse em andamento.
+    """
+    if not rotas:
+        return None
+
+    grupos = _rotas_por_situacao(rotas)
+
+    if grupos["in_progress"]:
+        return grupos["in_progress"][0]
+
+    if grupos["pending"]:
+        return sorted(grupos["pending"], key=_chave_de_data)[0]
+
+    return None
+
+
+def _linha_de_rota(rota: dict) -> str:
+    partes = [str(rota.get("name") or "rota sem nome")]
+    partes.append(_situacao(rota.get("status"), SITUACAO_DA_ROTA))
+
+    data = _format_date(_data_da_api(rota.get("date_set")))
+    if data:
+        partes.append(f"marcada para {data}")
+
+    regiao = " - ".join(
+        parte for parte in (rota.get("city"), rota.get("neighborhood")) if parte
+    )
+    if regiao:
+        partes.append(regiao)
+
+    return "- " + "; ".join(partes)
+
+
 def _format_routes_as_context(
-    rotas: list[dict], paradas: list[dict] | None = None
+    rotas: list[dict],
+    foco: dict | None = None,
+    paradas: list[dict] | None = None,
 ) -> str:
     if not rotas:
         return (
-            "SUA ROTA: nenhuma rota atribuida a voce no momento. "
+            "SUAS ROTAS: nenhuma rota atribuida a voce. "
             "Diga isso com clareza se perguntarem; nao invente rota."
         )
 
-    atual = rotas[0]
-    linhas = [
-        f"- Rota: {atual.get('name')}",
-        f"- Situacao: {atual.get('status')}",
-    ]
-    regiao = " - ".join(
-        parte for parte in (atual.get("city"), atual.get("neighborhood")) if parte
-    )
-    if regiao:
-        linhas.append(f"- Regiao: {regiao}")
+    linhas: list[str] = []
 
-    comeco = _data_da_api(atual.get("date_start"))
-    inicio = _format_date(comeco)
-    if inicio:
-        linhas.append(f"- Iniciada em: {inicio}")
-        linhas.append(_tempo_contra_o_limite(comeco, _data_da_api(atual.get("date_end"))))
+    if foco is None:
+        linhas.append(
+            "- Voce NAO tem nenhuma rota em andamento nem agendada no momento. "
+            "Todas as rotas abaixo ja foram encerradas."
+        )
     else:
-        linhas.append("- Ainda nao iniciada, entao o limite de 6 horas ainda nao comecou a contar")
+        em_andamento = foco.get("status") == "in_progress"
+        titulo = "ROTA EM ANDAMENTO" if em_andamento else "PROXIMA ROTA AGENDADA"
+        linhas.append(f"- {titulo}: {foco.get('name') or 'rota sem nome'}")
+        linhas.append(f"- Situacao: {_situacao(foco.get('status'), SITUACAO_DA_ROTA)}")
 
-    if atual.get("mileage") is not None:
-        linhas.append(f"- Km percorridos: {_formatar_numero(atual['mileage'])}")
+        regiao = " - ".join(
+            parte for parte in (foco.get("city"), foco.get("neighborhood")) if parte
+        )
+        if regiao:
+            linhas.append(f"- Regiao: {regiao}")
 
-    if paradas:
-        pendentes = [p for p in paradas if p.get("status") != "done"]
-        linhas.append(f"- Paradas: {len(paradas)} no total, {len(pendentes)} pendentes")
-        for parada in sorted(paradas, key=lambda p: p.get("stop_order") or 0)[:6]:
-            endereco = parada.get("address") or {}
-            local = ", ".join(
-                parte
-                for parte in (
-                    endereco.get("street"),
-                    endereco.get("number"),
-                    endereco.get("neighborhood"),
-                )
-                if parte
-            )
+        marcada = _format_date(_data_da_api(foco.get("date_set")))
+        if marcada:
+            linhas.append(f"- Marcada para: {marcada}")
+
+        comeco = _data_da_api(foco.get("date_start"))
+        if em_andamento and comeco:
+            linhas.append(f"- Iniciada em: {_format_date(comeco)}")
+            linhas.append(_tempo_contra_o_limite(comeco, None))
+        elif em_andamento:
             linhas.append(
-                f"  - parada {parada.get('stop_order')}: {local or 'endereco nao informado'}"
-                f" - {parada.get('status')}"
+                "- Sem horario de inicio registrado, entao nao da para contar o "
+                "limite de 6 horas"
+            )
+        else:
+            linhas.append(
+                "- Ainda nao iniciada: o limite de 6 horas so comeca a contar "
+                "quando voce iniciar a rota"
             )
 
-    outras = len(rotas) - 1
-    if outras > 0:
-        linhas.append(f"- Outras rotas suas no periodo: {outras}")
+        if foco.get("mileage") is not None:
+            linhas.append(f"- Km percorridos: {_formatar_numero(foco['mileage'])}")
 
-    corpo = "\n".join(linhas)
+        if paradas:
+            pendentes = [p for p in paradas if p.get("status") != "done"]
+            linhas.append(
+                f"- Paradas: {len(paradas)} no total, {len(pendentes)} pendentes"
+            )
+            for parada in sorted(paradas, key=lambda p: p.get("stop_order") or 0)[:6]:
+                endereco = parada.get("address") or {}
+                local = ", ".join(
+                    parte
+                    for parte in (
+                        endereco.get("street"),
+                        endereco.get("number"),
+                        endereco.get("neighborhood"),
+                    )
+                    if parte
+                )
+                situacao = _situacao(parada.get("status"), SITUACAO_DA_PARADA)
+                linhas.append(
+                    f"  - parada {parada.get('stop_order')}: "
+                    f"{local or 'endereco nao informado'} - {situacao}"
+                )
+
+    outras = [rota for rota in rotas if rota is not foco]
+    if outras:
+        linhas.append("- Suas outras rotas no periodo:")
+        linhas.extend(f"  {_linha_de_rota(rota)[2:]}" for rota in outras[:6])
+
+    corpo = NOVA_LINHA.join(linhas)
     return (
-        "SUA ROTA (lida no inicio desta conversa):\n"
-        f"{corpo}\n"
-        "Voce so enxerga a rota desta pessoa. Da nutriz, apenas o endereco da parada."
+        "SUAS ROTAS (lidas no banco no inicio desta conversa):"
+        + NOVA_LINHA
+        + corpo
+        + NOVA_LINHA
+        + "A situacao de cada rota acima e a que esta no banco agora. Use exatamente "
+        "essa situacao: uma rota JA CONCLUIDA nunca deve ser descrita como em "
+        "andamento, e uma rota agendada ainda nao comecou."
+        + NOVA_LINHA
+        + "Voce so enxerga as rotas desta pessoa. Da nutriz, apenas o endereco da parada."
     )
-
-
 def build_messages_for_staff(
     system_prompt: str,
     history: list[Message],
