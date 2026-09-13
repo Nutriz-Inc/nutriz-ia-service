@@ -186,7 +186,7 @@ ACTION_RULES: list[_ActionRule] = [
     # inofensivo, mas o veto evita prometer uma tela que ela nao tem.
     _ActionRule(
         slug="my_donations",
-        label="Ver minhas doacoes",
+        label="Ver minhas doações",
         authenticated_only=True,
         patterns=_compile(
             _navegacao(
@@ -200,7 +200,7 @@ ACTION_RULES: list[_ActionRule] = [
     ),
     _ActionRule(
         slug="new_donation",
-        label="Iniciar nova doacao",
+        label="Iniciar nova doação",
         authenticated_only=True,
         patterns=_compile(
             _navegacao("nova doacao", "outra doacao")
@@ -229,7 +229,7 @@ ACTION_RULES: list[_ActionRule] = [
     ),
     _ActionRule(
         slug="content_hub",
-        label="Ver conteudo educativo",
+        label="Ver conteúdo educativo",
         authenticated_only=True,
         patterns=_compile(
             _navegacao(
@@ -242,7 +242,7 @@ ACTION_RULES: list[_ActionRule] = [
     ),
     _ActionRule(
         slug="home",
-        label="Ir para o inicio",
+        label="Ir para o início",
         authenticated_only=True,
         patterns=_compile(
             _navegacao(
