@@ -392,7 +392,7 @@ async def funil_doadora(db: AsyncSession, periodo: Periodo) -> dict[str, Any]:
                COUNT(DISTINCT ds.id_donation) AS chegaram,
                COUNT(DISTINCT ds.id_donation) FILTER (WHERE ds.status::text = 'done') AS concluiram,
                AVG(EXTRACT(EPOCH FROM (ds.completed_at - ds.created_at)) / 86400)
-                 FILTER (WHERE ds.completed_at IS NOT NULL) AS dias_medios
+                 FILTER (WHERE ds.completed_at >= ds.created_at) AS dias_medios
         FROM donation_step ds
         JOIN donation d ON d.id_donation = ds.id_donation AND d.removed_at IS NULL
         WHERE {_no_periodo("d.created_at")}
