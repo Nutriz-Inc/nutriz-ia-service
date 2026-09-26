@@ -12,6 +12,7 @@
 
 import os
 import zlib
+from pathlib import Path
 from decimal import Decimal
 from datetime import datetime, timedelta, timezone
 from typing import AsyncIterator
@@ -42,6 +43,8 @@ from app.database import Base, get_db
 from app.llm.provider import LLMProvider, get_llm_provider
 from app.services.embeddings import embeddings_service
 
+
+ESQUEMA_GO_LOCAL = Path(__file__).resolve().parent.parent / "scripts" / "esquema_go_local.sql"
 
 SEED_USER_ID = "f058115f-51cb-4eb6-b7b9-7e2397299641"
 SEED_USER_NAME = "Usuaria Teste"
@@ -141,6 +144,8 @@ async def test_engine():
     async with engine.begin() as conn:
         await conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
         await conn.run_sync(Base.metadata.create_all)
+        bruta = await conn.get_raw_connection()
+        await bruta.driver_connection.execute(ESQUEMA_GO_LOCAL.read_text(encoding="utf-8"))
     yield engine
     await engine.dispose()
 
@@ -164,7 +169,8 @@ async def db_session(test_engine) -> AsyncIterator[AsyncSession]:
             text(
                 'TRUNCATE TABLE llm_audit, messages, conversations, kb_chunks, '
                 'consent_log, user_baby, bottle, donation_step, donation, '
-                'donation_point, address, "user" CASCADE'
+                'donation_point, address, route, route_donation_step, job, '
+                '"user" CASCADE'
             )
         )
         await conn.commit()
