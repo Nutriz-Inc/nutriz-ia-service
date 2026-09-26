@@ -2,6 +2,7 @@
 
 import httpx
 
+from app.config import settings
 from tests.conftest import make_token
 
 
@@ -22,6 +23,7 @@ async def test_health(app_with_overrides):
     assert corpo["status"] == "ok"
     assert corpo["service"] == "nutriz-ia-service"
     assert corpo["backend_api"] in ("local", "configurado")
+    assert corpo["llm_model"] == settings.GROQ_MODEL
 
 
 async def test_health_denuncia_backend_apontando_para_localhost(

@@ -15,4 +15,5 @@ async def health() -> dict[str, str]:
         "status": "ok",
         "service": "nutriz-ia-service",
         "backend_api": backend_configurado,
+        "llm_model": settings.GROQ_MODEL,
     }
