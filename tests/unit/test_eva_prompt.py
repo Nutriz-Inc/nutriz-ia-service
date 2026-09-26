@@ -473,3 +473,19 @@ class TestSituacaoRealDaRota:
         assert "ja concluido" in bloco
         assert "1 pendente," in bloco
         assert "status: done" not in bloco
+
+
+def test_todos_os_modos_da_eva_compartilham_o_mesmo_jeito():
+    from app.services.eva_personas import JEITO_DA_EVA, PROMPT_POR_PAPEL
+
+    assert JEITO_DA_EVA in EVA_SYSTEM_PROMPT
+    for prompt in PROMPT_POR_PAPEL.values():
+        assert JEITO_DA_EVA in prompt
+
+
+def test_modo_publico_recebe_a_visitante_com_simpatia():
+    messages = build_messages_for_public_llm([], "Como doar leite?", [])
+    system = messages[0]["content"]
+
+    assert "muito simpática" in system
+    assert "Receba a visitante com simpatia" in system
