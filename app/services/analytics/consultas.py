@@ -1,11 +1,16 @@
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Any
 
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.services.analytics.periodo import Periodo, agora_utc, resolver_periodo
+from app.services.analytics.periodo import (
+    FUSO_BRASILIA,
+    Periodo,
+    agora_utc,
+    resolver_periodo,
+)
 from app.services.analytics.privacidade import (
     SITUACAO_DA_ROTA,
     SITUACAO_DO_AGENDAMENTO,
@@ -75,7 +80,10 @@ def _litros(ml: Any) -> float:
 
 
 def _data(valor: datetime | None) -> str | None:
-    return valor.isoformat() if valor else None
+    if valor is None:
+        return None
+    local = valor.replace(tzinfo=timezone.utc).astimezone(FUSO_BRASILIA)
+    return local.isoformat(timespec="minutes")
 
 
 def _limites(periodo: Periodo) -> dict[str, datetime | None]:
