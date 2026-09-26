@@ -11,6 +11,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
 from app.routers import chat_ws, conversations, health, me, session
+from app.services.aquecimento import aquecer_dependencias
 from app.services.embeddings import embeddings_service
 
 
@@ -25,6 +26,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     await asyncio.to_thread(embeddings_service.encode, "warmup")
     elapsed_ms = (time.perf_counter() - start) * 1000
     logger.info(f"Modelo de embeddings pre-aquecido em {elapsed_ms:.0f}ms")
+    if settings.AQUECER_NO_STARTUP:
+        await aquecer_dependencias()
     logger.info(f"API do backend configurada em {settings.BACKEND_API_URL}")
     if settings.APP_ENV != "development" and "localhost" in settings.BACKEND_API_URL:
         logger.error(

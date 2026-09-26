@@ -24,6 +24,9 @@ class GroqProvider(LLMProvider):
             if content is not None:
                 yield content
 
+    async def aquecer(self) -> None:
+        await self.client.models.list()
+
     def _parametros_de_raciocinio(self) -> dict[str, str] | None:
         if not settings.GROQ_MODEL.startswith("openai/gpt-oss"):
             return None

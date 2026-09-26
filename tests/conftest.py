@@ -25,6 +25,7 @@ os.environ["DATABASE_URL"] = TEST_DATABASE_URL
 os.environ["JWT_SECRET"] = "segredo-de-teste"
 os.environ["GROQ_API_KEY"] = "chave-fake-de-teste"
 os.environ["LLM_PROVIDER"] = "groq"
+os.environ["AQUECER_NO_STARTUP"] = "false"
 
 import jwt as pyjwt
 import numpy as np

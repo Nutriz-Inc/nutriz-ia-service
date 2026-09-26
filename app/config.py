@@ -38,6 +38,7 @@ class Settings(BaseSettings):
     # Diretorio com o artefato ONNX de embeddings (model.onnx + tokenizer.json)
     # de vocabulario podado (250k->50k tokens). Ver docs/otimizacao-memoria.md.
     EMBEDDINGS_MODEL_DIR: str = "/models"
+    AQUECER_NO_STARTUP: bool = True
     APP_ENV: str = "development"
     LOG_LEVEL: str = "INFO"
 
