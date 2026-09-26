@@ -296,7 +296,9 @@ class TestPapeisDaEquipe:
         resultado = [m for m in segunda_chamada if m["role"] == "tool"]
         assert len(resultado) == 1
         assert "litros_coletados" in resultado[0]["content"]
-        assert fake_provider.pedidos_com_ferramentas[-1]["ferramentas"] is None
+        segunda = fake_provider.pedidos_com_ferramentas[-1]
+        assert segunda["ferramentas"]
+        assert segunda["obrigar"] is False
 
     async def test_relatorio_chega_como_frame_proprio(
         self, app_with_overrides, db_session, fake_provider: FakeProvider
@@ -343,6 +345,49 @@ class TestPapeisDaEquipe:
         assert frames[-1]["type"] == "done"
         resultado = [m for m in fake_provider.calls[-1] if m["role"] == "tool"][0]
         assert "erro" in resultado["content"]
+
+    async def test_falha_do_modelo_nao_derruba_a_conexao(
+        self, app_with_overrides, db_session, fake_provider: FakeProvider, monkeypatch
+    ):
+        async def quebra(*args, **kwargs):
+            raise RuntimeError("groq fora do ar")
+            yield
+
+        monkeypatch.setattr(fake_provider, "stream_com_ferramentas", quebra)
+        id_user = await self._seed(db_session, "adm")
+        token = make_token(user_id=id_user)
+        with TestClient(app_with_overrides) as client:
+            with client.websocket_connect(f"/ws/chat?token={token}") as ws:
+                ws.receive_json()
+                ws.receive_json()
+                ws.send_json({"message": "quantos litros?"})
+                primeiro = self._turno_com_frames(ws)
+                ws.send_json({"message": "e agora?"})
+                segundo = self._turno_com_frames(ws)
+
+        assert primeiro[-1]["type"] == "done"
+        assert segundo[-1]["type"] == "done"
+        texto = "".join(f["content"] for f in primeiro if f["type"] == "chunk")
+        assert "nao consegui montar a resposta" in texto.lower()
+
+    async def test_rodada_final_sem_ferramenta_tem_resposta_de_seguranca(
+        self, app_with_overrides, db_session, fake_provider: FakeProvider
+    ):
+        chamada = [
+            EventoDoModelo(
+                chamadas=[
+                    ChamadaDeFerramenta("c1", "consultar_alertas", "{}"),
+                ]
+            )
+        ]
+        fake_provider.roteiro = [chamada, chamada, [], [EventoDoModelo(texto="Resumo final.")]]
+
+        frames = await self._conversar_como(app_with_overrides, db_session, "adm", "e ai?")
+
+        texto = "".join(f["content"] for f in frames if f["type"] == "chunk")
+        assert texto == "Resumo final."
+        assert frames[-1]["type"] == "done"
+        assert fake_provider.pedidos_com_ferramentas[-1]["ferramentas"] is None
 
     @pytest.mark.parametrize("user_type", ["nurse", "driver"])
     async def test_papeis_de_campo_nao_recebem_ferramentas(

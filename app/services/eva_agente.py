@@ -15,7 +15,18 @@ from app.services.eva_ferramentas import (
 
 logger = logging.getLogger(__name__)
 
-RODADAS_COM_FERRAMENTAS = 1
+RODADAS_COM_FERRAMENTAS = 2
+PEDIDO_DE_RESPOSTA_FINAL = {
+    "role": "system",
+    "content": (
+        "Voce ja consultou tudo o que podia. Responda agora so com texto, usando "
+        "apenas os dados acima. Se faltar algum dado, diga qual."
+    ),
+}
+FALHA_NA_RESPOSTA_FINAL = (
+    "Consultei os dados, mas nao consegui montar a resposta agora. "
+    "Pode perguntar de novo?"
+)
 LIMITE_POR_CONSULTA_SEGUNDOS = 10.0
 
 FALHA_NA_CONSULTA = ResultadoDaFerramenta(
@@ -67,17 +78,29 @@ async def responder_com_ferramentas(
     ao_status: AoStatus,
     ao_relatorio: AoRelatorio,
 ) -> AsyncIterator[str]:
-    for rodada in range(RODADAS_COM_FERRAMENTAS + 1):
-        ferramentas = FERRAMENTAS if rodada < RODADAS_COM_FERRAMENTAS else None
+    tentativas_da_primeira = 2
+    rodada = 0
+    while rodada < RODADAS_COM_FERRAMENTAS:
         chamadas: list[ChamadaDeFerramenta] = []
+        enviou = False
 
-        async for evento in provider.stream_com_ferramentas(
-            messages, ferramentas, obrigar_ferramenta=rodada == 0
-        ):
-            if evento.texto:
-                yield evento.texto
-            if evento.chamadas:
-                chamadas = evento.chamadas
+        try:
+            async for evento in provider.stream_com_ferramentas(
+                messages, FERRAMENTAS, obrigar_ferramenta=rodada == 0
+            ):
+                if evento.texto:
+                    enviou = True
+                    yield evento.texto
+                if evento.chamadas:
+                    chamadas = evento.chamadas
+        except Exception:
+            logger.exception(f"Falha na rodada {rodada} com ferramentas")
+            if enviou:
+                return
+            if rodada == 0 and tentativas_da_primeira > 1:
+                tentativas_da_primeira -= 1
+                continue
+            break
 
         if not chamadas:
             return
@@ -95,3 +118,31 @@ async def responder_com_ferramentas(
                     "content": resultado.para_o_modelo(),
                 }
             )
+        rodada += 1
+
+    if rodada == 0:
+        yield FALHA_NA_RESPOSTA_FINAL
+        return
+
+    async for texto in _resposta_final(provider, messages):
+        yield texto
+
+
+async def _resposta_final(
+    provider: LLMProvider, messages: list[dict[str, Any]]
+) -> AsyncIterator[str]:
+    for tentativa in range(2):
+        conversa = messages if tentativa == 0 else [*messages, PEDIDO_DE_RESPOSTA_FINAL]
+        enviou = False
+        try:
+            async for evento in provider.stream_com_ferramentas(conversa, None):
+                if evento.texto:
+                    enviou = True
+                    yield evento.texto
+            if enviou:
+                return
+        except Exception:
+            logger.exception("Falha na resposta final do modo operacional")
+            if enviou:
+                return
+    yield FALHA_NA_RESPOSTA_FINAL

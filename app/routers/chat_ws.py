@@ -246,14 +246,21 @@ async def websocket_chat(
                 )
             else:
                 fluxo = provider.stream_chat(messages)
-            async for chunk in fluxo:
-                if first_token_at is None:
-                    first_token_at = time.time()
-                    turn_timer.record(
-                        "t_llm_first_token", (first_token_at - start_time) * 1000
-                    )
-                full_response += chunk
-                await websocket.send_json({"type": "chunk", "content": chunk})
+            try:
+                async for chunk in fluxo:
+                    if first_token_at is None:
+                        first_token_at = time.time()
+                        turn_timer.record(
+                            "t_llm_first_token", (first_token_at - start_time) * 1000
+                        )
+                    full_response += chunk
+                    await websocket.send_json({"type": "chunk", "content": chunk})
+            except WebSocketDisconnect:
+                raise
+            except Exception:
+                logger.exception(f"Falha ao gerar a resposta da conversa {conv_id}")
+                await db.rollback()
+                full_response = await _responder_falha(websocket, full_response)
 
             latency_ms = int((time.time() - start_time) * 1000)
             turn_timer.record("t_llm_total", latency_ms)
@@ -395,9 +402,15 @@ async def websocket_chat_public(
 
             start_time = time.time()
             full_response = ""
-            async for chunk in provider.stream_chat(messages):
-                full_response += chunk
-                await websocket.send_json({"type": "chunk", "content": chunk})
+            try:
+                async for chunk in provider.stream_chat(messages):
+                    full_response += chunk
+                    await websocket.send_json({"type": "chunk", "content": chunk})
+            except WebSocketDisconnect:
+                raise
+            except Exception:
+                logger.exception("Falha ao gerar a resposta no chat publico")
+                full_response = await _responder_falha(websocket, full_response)
 
             latency_ms = int((time.time() - start_time) * 1000)
 
@@ -457,6 +470,18 @@ def _enviar_relatorio(websocket: WebSocket):
         await websocket.send_json({"type": "report", "report": relatorio.como_frame()})
 
     return enviar
+
+
+FALHA_NO_TURNO = (
+    "Tive um problema para montar essa resposta agora. "
+    "Pode perguntar de novo em alguns segundos?"
+)
+
+
+async def _responder_falha(websocket: WebSocket, parcial: str) -> str:
+    complemento = FALHA_NO_TURNO if not parcial else "\n\n" + FALHA_NO_TURNO
+    await websocket.send_json({"type": "chunk", "content": complemento})
+    return parcial + complemento
 
 
 async def _stream_static_reply(websocket: WebSocket, text: str) -> None:
