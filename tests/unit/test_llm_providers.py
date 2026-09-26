@@ -82,6 +82,46 @@ async def test_groq_stream_chat_emite_conteudo(monkeypatch: pytest.MonkeyPatch):
     assert captured["stream"] is True
 
 
+async def _parametros_enviados(monkeypatch: pytest.MonkeyPatch, modelo: str) -> dict:
+    monkeypatch.setattr(settings, "GROQ_MODEL", modelo)
+    provider = GroqProvider()
+
+    async def fake_stream():
+        yield _groq_chunk("ok")
+
+    captured: dict = {}
+
+    async def fake_create(**kwargs):
+        captured.update(kwargs)
+        return fake_stream()
+
+    monkeypatch.setattr(provider.client.chat.completions, "create", fake_create)
+    [c async for c in provider.stream_chat([{"role": "user", "content": "oi"}])]
+    return captured
+
+
+async def test_groq_gpt_oss_pede_raciocinio_curto(monkeypatch: pytest.MonkeyPatch):
+    captured = await _parametros_enviados(monkeypatch, "openai/gpt-oss-120b")
+
+    assert captured["extra_body"] == {"reasoning_effort": settings.GROQ_REASONING_EFFORT}
+    assert captured["max_tokens"] == settings.LLM_MAX_TOKENS
+    assert captured["temperature"] == settings.LLM_TEMPERATURE
+
+
+async def test_groq_qwen_responde_sem_raciocinio(monkeypatch: pytest.MonkeyPatch):
+    captured = await _parametros_enviados(monkeypatch, "qwen/qwen3.8-27b")
+
+    assert captured["extra_body"] == {"reasoning_effort": "none"}
+
+
+async def test_groq_outro_modelo_nao_recebe_reasoning_effort(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    captured = await _parametros_enviados(monkeypatch, "meta-llama/llama-4-scout")
+
+    assert captured["extra_body"] is None
+
+
 async def test_ollama_stream_chat_emite_conteudo_e_para_no_done(
     monkeypatch: pytest.MonkeyPatch,
 ):

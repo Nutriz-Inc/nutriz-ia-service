@@ -30,11 +30,16 @@ class Settings(BaseSettings):
     GROQ_API_KEY: str = ""
     OPENROUTER_API_KEY: str = ""
     OLLAMA_BASE_URL: str = "http://localhost:11434"
-    GROQ_MODEL: str = "llama-3.3-70b-versatile"
+    GROQ_MODEL: str = "qwen/qwen3.8-27b"
+    GROQ_REASONING_EFFORT: str = "medium"
+    GROQ_MODELOS_RESERVA: str = "openai/gpt-oss-120b"
+    LLM_MAX_TOKENS: int = 1200
+    LLM_TEMPERATURE: float = 0.3
     OLLAMA_MODEL: str = "llama3.2:3b"
     # Diretorio com o artefato ONNX de embeddings (model.onnx + tokenizer.json)
     # de vocabulario podado (250k->50k tokens). Ver docs/otimizacao-memoria.md.
     EMBEDDINGS_MODEL_DIR: str = "/models"
+    AQUECER_NO_STARTUP: bool = True
     APP_ENV: str = "development"
     LOG_LEVEL: str = "INFO"
 

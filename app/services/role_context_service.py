@@ -1,12 +1,12 @@
 import asyncio
 import logging
-from datetime import date
+from datetime import date, datetime, timezone
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.services import backend_client
+from app.services.analytics.periodo import FUSO_BRASILIA, formatar_data
 from app.services.eva_prompt import (
-    _format_dashboard_as_context,
     _format_jobs_as_context,
     _format_routes_as_context,
     rota_em_foco,
@@ -16,15 +16,19 @@ from app.services.step_catalog import nomes_de_etapa
 logger = logging.getLogger(__name__)
 
 
-async def _contexto_do_adm(token: str) -> list[str]:
-    dados = await backend_client.fetch_dashboard(token)
-    bloco = _format_dashboard_as_context(dados)
-    if bloco is None:
-        return [
-            "INDICADORES DA OPERACAO: nao foi possivel ler os indicadores agora. "
-            "Diga que o painel tem os numeros atualizados; nao estime nenhum valor."
-        ]
-    return [bloco]
+DIAS_DA_SEMANA = (
+    "segunda-feira", "terca-feira", "quarta-feira", "quinta-feira",
+    "sexta-feira", "sabado", "domingo",
+)
+
+
+def contexto_do_adm(agora: datetime | None = None) -> list[str]:
+    momento = (agora or datetime.now(timezone.utc)).astimezone(FUSO_BRASILIA)
+    return [
+        f"AGORA: {DIAS_DA_SEMANA[momento.weekday()]}, {formatar_data(momento.date())}, "
+        f"{momento:%H}h{momento:%M} (horario de Brasilia). Todo dado da operacao vem "
+        "das ferramentas, lido no momento da consulta."
+    ]
 
 
 async def _contexto_da_enfermeira(db: AsyncSession, token: str) -> list[str]:
@@ -70,7 +74,7 @@ async def get_role_context(
 ) -> list[str]:
     try:
         if user_type == "adm":
-            return await _contexto_do_adm(token)
+            return contexto_do_adm()
         if user_type == "nurse":
             return await _contexto_da_enfermeira(db, token)
         if user_type == "driver":

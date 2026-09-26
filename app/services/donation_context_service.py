@@ -25,7 +25,7 @@ from typing import Awaitable, Callable, TypeVar
 from sqlalchemy import Select, and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import Address, Donation, DonationPoint, DonationStep
+from app.models import Address, Bottle, Donation, DonationPoint, DonationStep
 from app.schemas.donation import (
     ActiveDonation,
     CollectionPlace,
@@ -202,18 +202,23 @@ async def _load_place(
 
 
 async def _load_history(db: AsyncSession, id_user: str) -> DonationHistory:
-    # Agregado em uma unica query. O total vem da soma de
-    # donation.quantity_donated, e nao de user.milk_donated: essa coluna so e
-    # escrita pelo seed do Go, nenhum handler a mantem atualizada.
+    doacoes = and_(Donation.created_by == id_user, Donation.removed_at.is_(None))
     result = await db.execute(
         select(
             func.count(Donation.id_donation),
             func.count(Donation.id_donation).filter(Donation.is_active.is_(False)),
-            func.sum(Donation.quantity_donated),
             func.max(Donation.created_at),
-        ).where(and_(Donation.created_by == id_user, Donation.removed_at.is_(None)))
+        ).where(doacoes)
     )
-    total, concluded, volume, last_at = result.one()
+    total, concluded, last_at = result.one()
+
+    volume = (
+        await db.execute(
+            select(func.sum(Bottle.quantity_donated_ml))
+            .join(Donation, Donation.id_donation == Bottle.id_donation)
+            .where(doacoes, Bottle.discarded.isnot(True))
+        )
+    ).scalar_one()
 
     return DonationHistory(
         total_donations=total or 0,

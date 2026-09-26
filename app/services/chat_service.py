@@ -1,9 +1,9 @@
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 from uuid import UUID
 
 from fastapi import HTTPException, status
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import Conversation, LlmAudit, Message
@@ -62,6 +62,42 @@ async def save_message(
     await db.commit()
     await db.refresh(message)
     return message
+
+
+async def persist_turn(
+    db: AsyncSession,
+    conversation_id: UUID,
+    user_message: str,
+    user_message_at: datetime,
+    assistant_message: str,
+    audit: dict[str, Any],
+) -> None:
+    agora = datetime.now(timezone.utc)
+    if agora <= user_message_at:
+        agora = user_message_at + timedelta(microseconds=1)
+
+    pergunta = Message(
+        conversation_id=conversation_id,
+        role="user",
+        content=user_message,
+        created_at=user_message_at,
+    )
+    resposta = Message(
+        conversation_id=conversation_id,
+        role="assistant",
+        content=assistant_message,
+        created_at=agora,
+    )
+    db.add_all([pergunta, resposta])
+    await db.flush()
+
+    db.add(LlmAudit(conversation_id=conversation_id, message_id=resposta.id, **audit))
+    await db.execute(
+        update(Conversation)
+        .where(Conversation.id == conversation_id)
+        .values(last_message_at=agora)
+    )
+    await db.commit()
 
 
 async def get_recent_messages(

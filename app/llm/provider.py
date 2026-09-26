@@ -1,14 +1,40 @@
 from abc import ABC, abstractmethod
+from dataclasses import dataclass
 from functools import lru_cache
-from typing import AsyncIterator
+from typing import Any, AsyncIterator
 
 from app.config import settings
+
+
+@dataclass
+class ChamadaDeFerramenta:
+    id: str
+    nome: str
+    argumentos: str
+
+
+@dataclass
+class EventoDoModelo:
+    texto: str | None = None
+    chamadas: list[ChamadaDeFerramenta] | None = None
 
 
 class LLMProvider(ABC):
     @abstractmethod
     async def stream_chat(self, messages: list[dict[str, str]]) -> AsyncIterator[str]:
         ...
+
+    async def stream_com_ferramentas(
+        self,
+        messages: list[dict[str, Any]],
+        ferramentas: list[dict[str, Any]] | None,
+        obrigar_ferramenta: bool = False,
+    ) -> AsyncIterator[EventoDoModelo]:
+        async for texto in self.stream_chat(messages):
+            yield EventoDoModelo(texto=texto)
+
+    async def aquecer(self) -> None:
+        return None
 
     @abstractmethod
     def get_provider_name(self) -> str:

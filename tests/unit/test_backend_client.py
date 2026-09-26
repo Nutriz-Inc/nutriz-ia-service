@@ -18,52 +18,18 @@ def monta_cliente(handler) -> None:
     )
 
 
-class TestDashboard:
-    async def test_devolve_somente_campos_agregados(self):
-        def handler(request: httpx.Request) -> httpx.Response:
-            return httpx.Response(
-                200,
-                json={
-                    "total_milk_collected": 12450,
-                    "bottles_count": 320,
-                    "donor_recurrence_rate": 0.62,
-                    "nome_da_doadora": "Maria Ribeiro",
-                    "cpf": "12345678900",
-                },
-            )
-
-        monta_cliente(handler)
-        dados = await backend_client.fetch_dashboard("tok")
-
-        assert dados["total_milk_collected"] == 12450
-        assert "nome_da_doadora" not in dados
-        assert "cpf" not in dados
-
+class TestAutenticacao:
     async def test_manda_o_token_no_header(self):
         capturado = {}
 
         def handler(request: httpx.Request) -> httpx.Response:
             capturado["auth"] = request.headers.get("authorization")
-            return httpx.Response(200, json={"total_milk_collected": 1})
+            return httpx.Response(200, json={"data": []})
 
         monta_cliente(handler)
-        await backend_client.fetch_dashboard("tok-do-usuario")
+        await backend_client.fetch_jobs("tok-do-usuario")
 
         assert capturado["auth"] == "Bearer tok-do-usuario"
-
-    async def test_403_nao_derruba_e_devolve_none(self):
-        def handler(request: httpx.Request) -> httpx.Response:
-            return httpx.Response(403, json={"message": "forbidden"})
-
-        monta_cliente(handler)
-        assert await backend_client.fetch_dashboard("tok") is None
-
-    async def test_erro_de_rede_devolve_none(self):
-        def handler(request: httpx.Request) -> httpx.Response:
-            raise httpx.ConnectError("sem rede")
-
-        monta_cliente(handler)
-        assert await backend_client.fetch_dashboard("tok") is None
 
 
 class TestJobs:
