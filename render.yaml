@@ -36,7 +36,7 @@ services:
       - key: LLM_PROVIDER
         value: groq
       - key: GROQ_MODEL
-        value: llama-3.3-70b-versatile
+        value: openai/gpt-oss-120b
       - key: JWT_ALGORITHM
         value: HS256
       - key: EMBEDDINGS_MODEL_DIR
