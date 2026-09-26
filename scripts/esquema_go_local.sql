@@ -62,3 +62,13 @@ CREATE TABLE IF NOT EXISTS job (
   updated_at TIMESTAMP,
   removed_at TIMESTAMP
 );
+
+CREATE TABLE IF NOT EXISTS bottle (
+  id_bottle VARCHAR(36) PRIMARY KEY,
+  id_donation VARCHAR(36) NOT NULL,
+  quantity_donated_ml NUMERIC(10,2),
+  discarded BOOLEAN,
+  description TEXT,
+  created_at TIMESTAMP NOT NULL,
+  created_by VARCHAR(36)
+);
