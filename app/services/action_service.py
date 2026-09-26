@@ -91,13 +91,9 @@ ACTION_RULES: list[_ActionRule] = [
         user_types=frozenset({"adm"}),
         patterns=_compile(
             [
-                r"\b(?:gerar?|emitir?|emite|criar?|cria|montar?|monta|extrair|"
-                r"exportar?|baixar?|imprimir?|tirar?)\b[^.?!]{0,24}\brelatorio\b",
-                r"\brelatorio\b[^.?!]{0,24}\b(?:dashboard|painel|indicadores|"
-                r"operacao|periodo|mes|metricas)\b",
-                r"\b(?:quero|queria|preciso|pode|consegue|da para|teria como)\b"
-                r"[^.?!]{0,24}\brelatorio\b",
-                r"\brelatorio\b[^.?!]{0,16}\b(?:pdf|impress|a4|impressao)\b",
+                r"\brelatorio\b[^.?!]{0,24}\b(?:dashboard|painel)\b",
+                r"\b(?:dashboard|painel)\b[^.?!]{0,24}\brelatorio\b",
+                r"\bimprimir?\b[^.?!]{0,24}\b(?:dashboard|painel)\b",
             ]
         ),
         blockers=_compile(
