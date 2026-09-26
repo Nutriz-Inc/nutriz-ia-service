@@ -155,8 +155,8 @@ FERRAMENTAS: list[dict[str, Any]] = [
         "function": {
             "name": "consultar_alertas",
             "description": (
-                "Pendencias de agora: rotas perto ou acima de 6h, exames vencendo, "
-                "doacoes paradas, agendamentos atrasados."
+                "Situacao de agora: todas as rotas em andamento (com tempo no limite "
+                "de 6h), exames vencendo, doacoes paradas, agendamentos atrasados."
             ),
             "parameters": {"type": "object", "properties": {}},
         },

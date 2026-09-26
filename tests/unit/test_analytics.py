@@ -275,6 +275,7 @@ async def test_regioes_agrupam_pelo_endereco_da_doadora(cenario: AsyncSession):
 async def test_alertas_operacionais(cenario: AsyncSession):
     dados = await consultas.alertas(cenario)
 
+    assert dados["total_de_rotas_em_andamento_agora"] == 1
     assert [e["doadora"] for e in dados["exames_vencendo_em_30_dias"]] == ["Beatriz Souza"]
     assert dados["exames_vencidos_com_doacao_ativa"] == []
     assert len(dados["rotas_em_alerta_5h"]) == 1

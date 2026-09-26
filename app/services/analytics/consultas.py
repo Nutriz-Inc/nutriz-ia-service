@@ -678,6 +678,8 @@ async def alertas(db: AsyncSession) -> dict[str, Any]:
 
     return {
         "gerado_em": _data(agora),
+        "total_de_rotas_em_andamento_agora": len(rotas),
+        "rotas_em_andamento_agora": rotas,
         "rotas_passando_de_6h": [r for r in rotas if r["passou_de_6h"]],
         "rotas_em_alerta_5h": [r for r in rotas if r["em_alerta"]],
         "exames_vencendo_em_30_dias": await _exames(db, vencidos=False),
