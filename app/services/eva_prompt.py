@@ -358,60 +358,6 @@ def _formatar_numero(valor: object) -> str:
     return str(valor)
 
 
-def _format_dashboard_as_context(dados: dict | None) -> str | None:
-    if not dados:
-        return None
-
-    rotulos = [
-        ("total_milk_collected", "Leite captado no periodo (ml)"),
-        ("bottles_count", "Frascos recebidos"),
-        ("discarded_bottles_count", "Frascos descartados"),
-        ("bottles_utilization_rate", "Aproveitamento de frascos (0 a 1)"),
-        ("average_bottles_per_donor", "Media de frascos por doadora"),
-        ("average_mileage_per_route", "Media de km por rota"),
-        ("average_stops_per_route", "Media de paradas por rota"),
-        ("average_route_duration_hours", "Duracao media da rota (horas, limite 6)"),
-        ("average_service_time_hours", "Tempo medio de atendimento (horas)"),
-        ("donations_with_error", "Doacoes com erro"),
-        ("donor_recurrence_rate", "Recorrencia de doadoras (0 a 1)"),
-    ]
-
-    linhas = [
-        f"- {rotulo}: {_formatar_numero(dados[chave])}"
-        for chave, rotulo in rotulos
-        if dados.get(chave) is not None
-    ]
-
-    por_mes = dados.get("milk_collected_by_month")
-    if isinstance(por_mes, list) and por_mes:
-        serie = ", ".join(
-            f"{item.get('month')}: {_formatar_numero(item.get('total'))} ml"
-            for item in por_mes
-            if isinstance(item, dict)
-        )
-        linhas.append(f"- Leite por mes: {serie}")
-
-    por_etapa = dados.get("active_donations_by_step")
-    if isinstance(por_etapa, list) and por_etapa:
-        serie = ", ".join(
-            f"{item.get('step')}: {_formatar_numero(item.get('count'))}"
-            for item in por_etapa
-            if isinstance(item, dict)
-        )
-        linhas.append(f"- Doacoes ativas por etapa: {serie}")
-
-    if not linhas:
-        return None
-
-    corpo = "\n".join(linhas)
-    return (
-        "INDICADORES DA OPERACAO (agregados, do painel, lidos no inicio desta conversa):\n"
-        f"{corpo}\n"
-        "Estes numeros sao de toda a operacao, nunca de uma pessoa. "
-        "Nao ha nenhum dado individual disponivel para voce."
-    )
-
-
 # A situacao vem do banco em ingles (enum do backend). Traduzir aqui, e nao
 # deixar a string crua chegar ao modelo, e o que impede a EVA de descrever uma
 # rota ja concluida como se ainda estivesse em andamento.

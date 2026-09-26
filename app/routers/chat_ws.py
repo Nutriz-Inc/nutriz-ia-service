@@ -17,6 +17,8 @@ from app.services.auth_ws import authenticate_websocket
 from app.services.consent_service import has_valid_consent
 from app.services.donation_context_service import get_donation_context
 from app.services.embeddings import embeddings_service
+from app.services.eva_agente import responder_com_ferramentas
+from app.services.eva_ferramentas import Relatorio
 from app.services.eva_prompt import (
     build_messages_for_llm_with_rag,
     build_messages_for_public_llm,
@@ -197,12 +199,16 @@ async def websocket_chat(
                     embeddings_service.encode_async(user_message),
                 )
 
-            rag_chunks = await search_chunks(
-                db,
-                user_message,
-                top_k=3,
-                timer=turn_timer,
-                query_embedding=query_embedding,
+            rag_chunks = (
+                []
+                if user_type == "adm"
+                else await search_chunks(
+                    db,
+                    user_message,
+                    top_k=3,
+                    timer=turn_timer,
+                    query_embedding=query_embedding,
+                )
             )
 
             action = detect_action(
@@ -230,7 +236,17 @@ async def websocket_chat(
             start_time = time.time()
             first_token_at: float | None = None
             full_response = ""
-            async for chunk in provider.stream_chat(messages):
+            if user_type == "adm":
+                fluxo = responder_com_ferramentas(
+                    provider,
+                    db,
+                    messages,
+                    ao_status=_enviar_status(websocket),
+                    ao_relatorio=_enviar_relatorio(websocket),
+                )
+            else:
+                fluxo = provider.stream_chat(messages)
+            async for chunk in fluxo:
                 if first_token_at is None:
                     first_token_at = time.time()
                     turn_timer.record(
@@ -427,6 +443,20 @@ async def websocket_chat_public(
             await websocket.close()
         except Exception:
             pass
+
+
+def _enviar_status(websocket: WebSocket):
+    async def enviar(mensagem: str) -> None:
+        await websocket.send_json({"type": "status", "message": mensagem})
+
+    return enviar
+
+
+def _enviar_relatorio(websocket: WebSocket):
+    async def enviar(relatorio: Relatorio) -> None:
+        await websocket.send_json({"type": "report", "report": relatorio.como_frame()})
+
+    return enviar
 
 
 async def _stream_static_reply(websocket: WebSocket, text: str) -> None:

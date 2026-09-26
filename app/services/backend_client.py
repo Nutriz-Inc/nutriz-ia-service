@@ -48,23 +48,6 @@ CAMPOS_JOB = (
     "date_set",
 )
 
-CAMPOS_DASHBOARD = (
-    "total_milk_collected",
-    "bottles_count",
-    "discarded_bottles_count",
-    "average_bottles_per_donor",
-    "bottles_utilization_rate",
-    "average_mileage_per_route",
-    "average_stops_per_route",
-    "average_route_duration_hours",
-    "average_service_time_hours",
-    "donations_with_error",
-    "donor_recurrence_rate",
-    "milk_collected_by_month",
-    "active_donations_by_step",
-)
-
-
 def _somente(origem: dict[str, Any], campos: tuple[str, ...]) -> dict[str, Any]:
     return {chave: origem.get(chave) for chave in campos if origem.get(chave) is not None}
 
@@ -94,24 +77,6 @@ async def _get(caminho: str, token: str, params: dict[str, Any] | None = None) -
     )
     resposta.raise_for_status()
     return resposta.json()
-
-
-async def fetch_dashboard(token: str) -> dict[str, Any] | None:
-    try:
-        dados = await _get("/internal/dashboard", token)
-    except httpx.HTTPStatusError as e:
-        logger.warning(
-            f"Dashboard indisponivel para a EVA: HTTP {e.response.status_code}"
-        )
-        return None
-    except httpx.HTTPError:
-        logger.exception("Falha de rede ao buscar o dashboard para a EVA")
-        return None
-
-    if not isinstance(dados, dict):
-        return None
-
-    return _somente(dados, CAMPOS_DASHBOARD)
 
 
 async def fetch_jobs(

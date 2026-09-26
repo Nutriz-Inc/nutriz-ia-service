@@ -5,6 +5,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import text
 from starlette.testclient import WebSocketDisconnect
 
+from app.llm.provider import ChamadaDeFerramenta, EventoDoModelo
 from tests.conftest import FakeProvider, make_token
 
 
@@ -237,28 +238,119 @@ class TestPapeisDaEquipe:
         assert "Coletas zona sul" in system_prompt
         assert "Rua Loefgren" in system_prompt
 
-    async def test_adm_recebe_agregado_e_a_regra_de_recusa(
-        self, app_with_overrides, db_session, monkeypatch, fake_provider: FakeProvider
-    ):
-        from app.services import backend_client
+    def _turno_com_frames(self, ws) -> list[dict]:
+        frames = []
+        while True:
+            frame = ws.receive_json()
+            frames.append(frame)
+            if frame["type"] in ("done", "error"):
+                return frames
 
-        async def dashboard(token):
-            return {"total_milk_collected": 12450, "bottles_count": 320}
-
-        monkeypatch.setattr(backend_client, "fetch_dashboard", dashboard)
-
-        id_user = await self._seed(db_session, "adm")
+    async def _conversar_como(self, app, db_session, user_type: str, mensagem: str) -> list[dict]:
+        id_user = await self._seed(db_session, user_type)
         token = make_token(user_id=id_user)
-        with TestClient(app_with_overrides) as client:
+        with TestClient(app) as client:
             with client.websocket_connect(f"/ws/chat?token={token}") as ws:
                 ws.receive_json()
                 ws.receive_json()
-                ws.send_json({"message": "quanto de leite este mes?"})
-                _collect_turn(ws)
+                ws.send_json({"message": mensagem})
+                return self._turno_com_frames(ws)
+
+    async def test_adm_recebe_data_de_agora_e_regra_de_privacidade(
+        self, app_with_overrides, db_session, fake_provider: FakeProvider
+    ):
+        await self._conversar_como(app_with_overrides, db_session, "adm", "bom dia")
 
         system_prompt = fake_provider.calls[-1][0]["content"]
-        assert "12450" in system_prompt
-        assert "consulte o perfil pelo painel" in system_prompt.lower()
+        assert "AGORA:" in system_prompt
+        assert "prontuário da equipe Lactare" in system_prompt
+        primeiro = fake_provider.pedidos_com_ferramentas[0]
+        assert primeiro["ferramentas"]
+        assert primeiro["obrigar"] is True
+
+    async def test_adm_consulta_ferramenta_antes_de_responder(
+        self, app_with_overrides, db_session, fake_provider: FakeProvider
+    ):
+        fake_provider.roteiro = [
+            [
+                EventoDoModelo(
+                    chamadas=[
+                        ChamadaDeFerramenta(
+                            "c1", "consultar_indicadores", '{"tema":"visao_geral","periodo":"tudo"}'
+                        )
+                    ]
+                )
+            ],
+            [EventoDoModelo(texto="Nenhum litro coletado ainda.")],
+        ]
+
+        frames = await self._conversar_como(
+            app_with_overrides, db_session, "adm", "quanto leite coletamos?"
+        )
+
+        assert {"type": "status", "message": "Consultando os indicadores"} in frames
+        texto = "".join(f["content"] for f in frames if f["type"] == "chunk")
+        assert texto == "Nenhum litro coletado ainda."
+
+        segunda_chamada = fake_provider.calls[-1]
+        resultado = [m for m in segunda_chamada if m["role"] == "tool"]
+        assert len(resultado) == 1
+        assert "litros_coletados" in resultado[0]["content"]
+        assert fake_provider.pedidos_com_ferramentas[-1]["ferramentas"] is None
+
+    async def test_relatorio_chega_como_frame_proprio(
+        self, app_with_overrides, db_session, fake_provider: FakeProvider
+    ):
+        fake_provider.roteiro = [
+            [
+                EventoDoModelo(
+                    chamadas=[
+                        ChamadaDeFerramenta(
+                            "c1", "gerar_relatorio", '{"tipo":"desempenho_motoristas"}'
+                        )
+                    ]
+                )
+            ],
+            [EventoDoModelo(texto="Relatorio pronto.")],
+        ]
+
+        frames = await self._conversar_como(
+            app_with_overrides, db_session, "adm", "gera o relatorio dos motoristas"
+        )
+
+        relatorios = [f["report"] for f in frames if f["type"] == "report"]
+        assert len(relatorios) == 1
+        assert relatorios[0]["titulo"] == "Desempenho dos motoristas"
+        assert [c["chave"] for c in relatorios[0]["colunas"]][0] == "motorista"
+        assert frames[-1]["type"] == "done"
+
+    async def test_argumento_invalido_vira_erro_para_o_modelo_e_nao_derruba(
+        self, app_with_overrides, db_session, fake_provider: FakeProvider
+    ):
+        fake_provider.roteiro = [
+            [
+                EventoDoModelo(
+                    chamadas=[
+                        ChamadaDeFerramenta("c1", "consultar_indicadores", '{"tema":"inventado"}')
+                    ]
+                )
+            ],
+            [EventoDoModelo(texto="Nao consegui ler.")],
+        ]
+
+        frames = await self._conversar_como(app_with_overrides, db_session, "adm", "e ai?")
+
+        assert frames[-1]["type"] == "done"
+        resultado = [m for m in fake_provider.calls[-1] if m["role"] == "tool"][0]
+        assert "erro" in resultado["content"]
+
+    @pytest.mark.parametrize("user_type", ["nurse", "driver"])
+    async def test_papeis_de_campo_nao_recebem_ferramentas(
+        self, app_with_overrides, db_session, user_type, fake_provider: FakeProvider
+    ):
+        await self._conversar_como(app_with_overrides, db_session, user_type, "bom dia")
+
+        assert fake_provider.pedidos_com_ferramentas == []
 
 
 class TestFrameDeAcaoAutenticado:
