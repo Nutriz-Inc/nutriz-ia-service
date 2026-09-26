@@ -26,6 +26,13 @@ async def test_health(app_with_overrides):
     assert corpo["llm_model"] == settings.GROQ_MODEL
 
 
+async def test_health_banco_consulta_o_banco(app_with_overrides):
+    async with _client(app_with_overrides) as client:
+        response = await client.get("/health/banco")
+    assert response.status_code == 200
+    assert response.json() == {"status": "ok", "banco": "ok"}
+
+
 async def test_health_denuncia_backend_apontando_para_localhost(
     app_with_overrides, monkeypatch
 ):
