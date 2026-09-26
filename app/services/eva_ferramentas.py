@@ -89,16 +89,9 @@ class ArgumentosDeRelatorio(ArgumentosDeFiltro):
 
 
 PROPRIEDADES_DE_PERIODO: dict[str, Any] = {
-    "periodo": {
-        "type": "string",
-        "enum": list(PRESETS),
-        "description": "Recorte de tempo. Padrao: mes_atual.",
-    },
-    "data_inicio": {
-        "type": "string",
-        "description": "Opcional, AAAA-MM-DD. Use so quando a pessoa citar datas exatas.",
-    },
-    "data_fim": {"type": "string", "description": "Opcional, AAAA-MM-DD."},
+    "periodo": {"type": "string", "enum": list(PRESETS)},
+    "data_inicio": {"type": "string", "description": "AAAA-MM-DD"},
+    "data_fim": {"type": "string", "description": "AAAA-MM-DD"},
 }
 
 PROPRIEDADES_DE_FILTRO: dict[str, Any] = {
@@ -106,26 +99,16 @@ PROPRIEDADES_DE_FILTRO: dict[str, Any] = {
     "etapa": {"type": "string", "enum": list(consultas.ETAPAS)},
     "situacao": {
         "type": "string",
-        "description": (
-            "Rotas: pending, in_progress, done, error, canceled. "
-            "Agendamentos: pending, done, failed."
-        ),
+        "enum": ["pending", "in_progress", "done", "error", "canceled", "failed"],
     },
     "cidade": {"type": "string"},
     "bairro": {"type": "string"},
-    "nome": {"type": "string", "description": "Parte do nome da doadora."},
+    "nome": {"type": "string"},
     "motorista": {"type": "string"},
     "enfermeira": {"type": "string"},
     "recorrente": {"type": "boolean"},
-    "exame": {
-        "type": "string",
-        "enum": ["vencendo", "vencido"],
-        "description": "Validade do exame de sangue da doadora (vencendo = proximos 30 dias).",
-    },
-    "somente_ativas": {
-        "type": "boolean",
-        "description": "Doadoras: so com doacao ativa. Padrao true.",
-    },
+    "exame": {"type": "string", "enum": ["vencendo", "vencido"]},
+    "somente_ativas": {"type": "boolean"},
 }
 
 FERRAMENTAS: list[dict[str, Any]] = [
@@ -156,7 +139,8 @@ FERRAMENTAS: list[dict[str, Any]] = [
             "name": "consultar_alertas",
             "description": (
                 "Situacao de agora: todas as rotas em andamento (com tempo no limite "
-                "de 6h), exames vencendo, doacoes paradas, agendamentos atrasados."
+                "de 6h), exames vencendo, doacoes paradas e o total de agendamentos "
+                "atrasados. Atrasos por enfermeira: desempenho_enfermagem."
             ),
             "parameters": {"type": "object", "properties": {}},
         },

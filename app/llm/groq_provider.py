@@ -26,6 +26,17 @@ def modelos_em_ordem() -> list[str]:
     return [settings.GROQ_MODEL, *reservas]
 
 
+def registrar_uso(chunk: Any) -> None:
+    extra = getattr(chunk, "x_groq", None)
+    uso = getattr(extra, "usage", None) if extra else None
+    if uso is None:
+        return
+    logger.info(
+        f"tokens entrada={getattr(uso, 'prompt_tokens', None)} "
+        f"saida={getattr(uso, 'completion_tokens', None)}"
+    )
+
+
 class GroqProvider(LLMProvider):
     def __init__(self) -> None:
         self.client = AsyncGroq(api_key=settings.GROQ_API_KEY)
@@ -55,6 +66,7 @@ class GroqProvider(LLMProvider):
     async def stream_chat(self, messages: list[dict[str, str]]) -> AsyncIterator[str]:
         stream = await self._criar_stream(messages=messages)
         async for chunk in stream:
+            registrar_uso(chunk)
             if not chunk.choices:
                 continue
             content = chunk.choices[0].delta.content
@@ -74,6 +86,7 @@ class GroqProvider(LLMProvider):
         )
         parciais: dict[int, dict[str, str]] = {}
         async for chunk in stream:
+            registrar_uso(chunk)
             if not chunk.choices:
                 continue
             delta = chunk.choices[0].delta

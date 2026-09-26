@@ -195,7 +195,9 @@ async def websocket_chat(
 
             with turn_timer.measure("t_history_e_embedding"):
                 history, query_embedding = await asyncio.gather(
-                    chat_service.get_recent_messages(db, conv_id, limit=10),
+                    chat_service.get_recent_messages(
+                        db, conv_id, limit=4 if user_type == "adm" else 10
+                    ),
                     embeddings_service.encode_async(user_message),
                 )
 
