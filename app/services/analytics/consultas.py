@@ -25,6 +25,8 @@ AVISO_ROTA_HORAS = 5
 DIAS_PARA_EXAME_VENCER = 30
 DIAS_PARADA_NA_ETAPA = 7
 LIMITE_DE_LINHAS = 200
+KM_MAXIMO_POR_ROTA = 600
+KM_VALIDO = "CASE WHEN {coluna} > 0 AND {coluna} <= :km_maximo THEN {coluna} END"
 
 ETAPAS = (
     "Exame de sangue",
@@ -318,12 +320,34 @@ async def logistica(db: AsyncSession, periodo: Periodo) -> dict[str, Any]:
         db,
         f"""
         SELECT COUNT(*) AS rotas,
-               COALESCE(SUM(r.mileage), 0) AS km,
-               AVG(r.mileage) AS km_medio
+               COALESCE(SUM({KM_VALIDO.format(coluna="r.mileage")}), 0) AS km,
+               AVG({KM_VALIDO.format(coluna="r.mileage")}) AS km_medio,
+               COUNT(*) FILTER (WHERE r.mileage > :km_maximo) AS km_invalido
         FROM route r
         WHERE r.removed_at IS NULL AND r.status::text = 'done'
           AND {_no_periodo("r.date_set")}
         """,
+        km_maximo=KM_MAXIMO_POR_ROTA,
+        **limites,
+    )
+
+    coletado_com_km = await _uma(
+        db,
+        f"""
+        SELECT COALESCE(SUM(b.quantity_donated_ml), 0) AS ml
+        FROM bottle b
+        WHERE b.discarded IS NOT TRUE
+          AND b.id_donation IN (
+            SELECT ds.id_donation
+            FROM route_donation_step p
+            JOIN route r ON r.id_route = p.id_route AND r.removed_at IS NULL
+            JOIN donation_step ds ON ds.id_donation_step = p.id_donation_step
+            WHERE p.removed_at IS NULL AND r.status::text = 'done'
+              AND r.mileage > 0 AND r.mileage <= :km_maximo
+              AND {_no_periodo("r.date_set")}
+          )
+        """,
+        km_maximo=KM_MAXIMO_POR_ROTA,
         **limites,
     )
 
@@ -360,6 +384,7 @@ async def logistica(db: AsyncSession, periodo: Periodo) -> dict[str, Any]:
     )
 
     litros = _litros(coletado.get("ml"))
+    litros_com_km = _litros(coletado_com_km.get("ml"))
     km = _numero(rotas.get("km"), 1) or 0
     rotas_concluidas = _inteiro(rotas.get("rotas"))
 
@@ -369,7 +394,9 @@ async def logistica(db: AsyncSession, periodo: Periodo) -> dict[str, Any]:
         "km_rodados": km,
         "km_medio_por_rota": _numero(rotas.get("km_medio"), 1),
         "litros_coletados_nas_rotas": litros,
-        "km_por_litro_coletado": round(km / litros, 2) if litros else None,
+        "km_por_litro_coletado": round(km / litros_com_km, 2) if litros_com_km and km else None,
+        "rotas_com_km_implausivel": _inteiro(rotas.get("km_invalido")),
+        "km_maximo_por_rota": KM_MAXIMO_POR_ROTA,
         "litros_por_rota": round(litros / rotas_concluidas, 2) if rotas_concluidas else None,
         "paradas": _inteiro(paradas.get("paradas")),
         "paradas_feitas": _inteiro(paradas.get("feitas")),
@@ -466,7 +493,8 @@ async def desempenho_motoristas(db: AsyncSession, periodo: Periodo) -> dict[str,
         db,
         f"""
         WITH rotas AS (
-            SELECT r.id_route, r.id_driver, r.status::text AS status, r.mileage,
+            SELECT r.id_route, r.id_driver, r.status::text AS status,
+                   {KM_VALIDO.format(coluna="r.mileage")} AS mileage,
                    EXTRACT(EPOCH FROM (r.date_end - r.date_start)) / 3600 AS horas
             FROM route r
             WHERE r.removed_at IS NULL AND {_no_periodo("r.date_set")}
@@ -497,6 +525,7 @@ async def desempenho_motoristas(db: AsyncSession, periodo: Periodo) -> dict[str,
         ORDER BY rotas DESC, u.name
         """,
         limite=LIMITE_ROTA_HORAS,
+        km_maximo=KM_MAXIMO_POR_ROTA,
         **limites,
     )
 

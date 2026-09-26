@@ -351,3 +351,19 @@ def test_limites_do_periodo_em_utc():
 
     assert periodo.inicio_utc == datetime(2026, 9, 26, 3, 0)
     assert periodo.fim_utc == datetime(2026, 9, 27, 3, 0)
+
+
+async def test_quilometragem_implausivel_fica_fora_do_km_por_litro(cenario: AsyncSession):
+    await cenario.execute(text("UPDATE route SET mileage = 330000 WHERE id_route = 'r2'"))
+    await cenario.commit()
+
+    dados = await consultas.logistica(cenario, TUDO)
+    motoristas = {
+        m["motorista"]: m
+        for m in (await consultas.desempenho_motoristas(cenario, TUDO))["motoristas"]
+    }
+
+    assert dados["rotas_com_km_implausivel"] == 1
+    assert dados["km_rodados"] == 40.0
+    assert dados["km_por_litro_coletado"] == pytest.approx(30.77, abs=0.01)
+    assert motoristas["Marta Motorista"]["km_rodados"] == 0.0
