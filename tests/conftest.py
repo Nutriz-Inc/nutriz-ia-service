@@ -12,6 +12,7 @@
 
 import os
 import zlib
+from decimal import Decimal
 from datetime import datetime, timedelta, timezone
 from typing import AsyncIterator
 
@@ -162,7 +163,7 @@ async def db_session(test_engine) -> AsyncIterator[AsyncSession]:
         await conn.execute(
             text(
                 'TRUNCATE TABLE llm_audit, messages, conversations, kb_chunks, '
-                'consent_log, user_baby, donation_step, donation, '
+                'consent_log, user_baby, bottle, donation_step, donation, '
                 'donation_point, address, "user" CASCADE'
             )
         )
@@ -272,6 +273,29 @@ async def insert_donation_step(
     await db_session.commit()
 
 
+async def insert_bottle(
+    db_session: AsyncSession,
+    id_bottle: str,
+    id_donation: str,
+    ml: str,
+    discarded: bool = False,
+) -> None:
+    await db_session.execute(
+        text(
+            "INSERT INTO bottle (id_bottle, id_donation, quantity_donated_ml, "
+            "discarded, created_at) VALUES (:id, :id_donation, :ml, :discarded, :now)"
+        ),
+        {
+            "id": id_bottle,
+            "id_donation": id_donation,
+            "ml": Decimal(ml),
+            "discarded": discarded,
+            "now": datetime.now(timezone.utc).replace(tzinfo=None),
+        },
+    )
+    await db_session.commit()
+
+
 @pytest_asyncio.fixture(loop_scope="session")
 async def seed_donations(db_session: AsyncSession, seed_user: str) -> str:
     now = _naive_now()
@@ -301,7 +325,7 @@ async def seed_donations(db_session: AsyncSession, seed_user: str) -> str:
     await db_session.execute(
         text(
             "INSERT INTO donation (id_donation, created_by, is_active, "
-            "quantity_donated, created_at) VALUES (:id, :user, false, 700.00, :created)"
+            "created_at) VALUES (:id, :user, false, :created)"
         ),
         {"id": SEED_DONATION_OLD_ID, "user": seed_user, "created": now - timedelta(days=90)},
     )
@@ -309,11 +333,17 @@ async def seed_donations(db_session: AsyncSession, seed_user: str) -> str:
     await db_session.execute(
         text(
             "INSERT INTO donation (id_donation, created_by, is_active, "
-            "quantity_donated, created_at) VALUES (:id, :user, true, 550.00, :created)"
+            "created_at) VALUES (:id, :user, true, :created)"
         ),
         {"id": SEED_DONATION_ACTIVE_ID, "user": seed_user, "created": now - timedelta(days=10)},
     )
     await db_session.commit()
+
+    await insert_bottle(db_session, "fr_antiga_1", SEED_DONATION_OLD_ID, "250.00")
+    await insert_bottle(db_session, "fr_antiga_2", SEED_DONATION_OLD_ID, "250.00")
+    await insert_bottle(db_session, "fr_antiga_3", SEED_DONATION_OLD_ID, "200.00")
+    await insert_bottle(db_session, "fr_ativa_1", SEED_DONATION_ACTIVE_ID, "250.00")
+    await insert_bottle(db_session, "fr_ativa_2", SEED_DONATION_ACTIVE_ID, "300.00")
 
     await insert_donation_step(
         db_session, "dst_exame", SEED_DONATION_ACTIVE_ID, "Exame de sangue",
