@@ -15,11 +15,19 @@ class GroqProvider(LLMProvider):
             model=settings.GROQ_MODEL,
             messages=messages,
             stream=True,
+            max_tokens=settings.LLM_MAX_TOKENS,
+            temperature=settings.LLM_TEMPERATURE,
+            extra_body=self._parametros_de_raciocinio(),
         )
         async for chunk in stream:
             content = chunk.choices[0].delta.content
             if content is not None:
                 yield content
+
+    def _parametros_de_raciocinio(self) -> dict[str, str] | None:
+        if not settings.GROQ_MODEL.startswith("openai/gpt-oss"):
+            return None
+        return {"reasoning_effort": settings.GROQ_REASONING_EFFORT}
 
     def get_provider_name(self) -> str:
         return "groq"
