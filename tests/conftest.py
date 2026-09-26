@@ -28,6 +28,7 @@ os.environ["JWT_SECRET"] = "segredo-de-teste"
 os.environ["GROQ_API_KEY"] = "chave-fake-de-teste"
 os.environ["LLM_PROVIDER"] = "groq"
 os.environ["AQUECER_NO_STARTUP"] = "false"
+os.environ["GROQ_MODELOS_RESERVA"] = ""
 
 import jwt as pyjwt
 import numpy as np
@@ -40,7 +41,7 @@ from sqlalchemy.pool import NullPool
 from app import models  # noqa: F401 - registra todas as tabelas no Base.metadata
 from app.config import settings
 from app.database import Base, get_db
-from app.llm.provider import LLMProvider, get_llm_provider
+from app.llm.provider import EventoDoModelo, LLMProvider, get_llm_provider
 from app.services.embeddings import embeddings_service
 
 
@@ -101,11 +102,27 @@ class FakeProvider(LLMProvider):
     def __init__(self, chunks: tuple[str, ...] = ("Ola, ", "sou a EVA ", "de teste.")) -> None:
         self.chunks = chunks
         self.calls: list[list[dict[str, str]]] = []
+        self.roteiro: list[list[EventoDoModelo]] = []
+        self.pedidos_com_ferramentas: list[dict] = []
 
     async def stream_chat(self, messages: list[dict[str, str]]) -> AsyncIterator[str]:
         self.calls.append(messages)
         for chunk in self.chunks:
             yield chunk
+
+    async def stream_com_ferramentas(
+        self, messages, ferramentas, obrigar_ferramenta: bool = False
+    ) -> AsyncIterator[EventoDoModelo]:
+        self.pedidos_com_ferramentas.append(
+            {"ferramentas": ferramentas, "obrigar": obrigar_ferramenta}
+        )
+        if not self.roteiro:
+            async for texto in self.stream_chat(messages):
+                yield EventoDoModelo(texto=texto)
+            return
+        self.calls.append(list(messages))
+        for evento in self.roteiro.pop(0):
+            yield evento
 
     def get_provider_name(self) -> str:
         return "fake"

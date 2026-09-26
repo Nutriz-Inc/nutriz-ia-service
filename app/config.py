@@ -32,6 +32,7 @@ class Settings(BaseSettings):
     OLLAMA_BASE_URL: str = "http://localhost:11434"
     GROQ_MODEL: str = "qwen/qwen3.8-27b"
     GROQ_REASONING_EFFORT: str = "low"
+    GROQ_MODELOS_RESERVA: str = "openai/gpt-oss-120b,openai/gpt-oss-20b"
     LLM_MAX_TOKENS: int = 1200
     LLM_TEMPERATURE: float = 0.3
     OLLAMA_MODEL: str = "llama3.2:3b"
