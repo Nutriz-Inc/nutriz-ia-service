@@ -3,6 +3,7 @@ import json
 import logging
 import time
 import traceback
+from datetime import datetime, timezone
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query, WebSocket, WebSocketDisconnect
@@ -16,6 +17,8 @@ from app.services.auth_ws import authenticate_websocket
 from app.services.consent_service import has_valid_consent
 from app.services.donation_context_service import get_donation_context
 from app.services.embeddings import embeddings_service
+from app.services.eva_agente import responder_com_ferramentas
+from app.services.eva_ferramentas import Relatorio
 from app.services.eva_prompt import (
     build_messages_for_llm_with_rag,
     build_messages_for_public_llm,
@@ -188,19 +191,26 @@ async def websocket_chat(
                 continue
 
             turn_timer = PhaseTimer()
+            recebida_em = datetime.now(timezone.utc)
 
             with turn_timer.measure("t_history_e_embedding"):
                 history, query_embedding = await asyncio.gather(
-                    chat_service.get_recent_messages(db, conv_id, limit=10),
+                    chat_service.get_recent_messages(
+                        db, conv_id, limit=4 if user_type == "adm" else 10
+                    ),
                     embeddings_service.encode_async(user_message),
                 )
 
-            rag_chunks = await search_chunks(
-                db,
-                user_message,
-                top_k=3,
-                timer=turn_timer,
-                query_embedding=query_embedding,
+            rag_chunks = (
+                []
+                if user_type == "adm"
+                else await search_chunks(
+                    db,
+                    user_message,
+                    top_k=3,
+                    timer=turn_timer,
+                    query_embedding=query_embedding,
+                )
             )
 
             action = detect_action(
@@ -228,49 +238,58 @@ async def websocket_chat(
             start_time = time.time()
             first_token_at: float | None = None
             full_response = ""
-            async for chunk in provider.stream_chat(messages):
-                if first_token_at is None:
-                    first_token_at = time.time()
-                    turn_timer.record(
-                        "t_llm_first_token", (first_token_at - start_time) * 1000
-                    )
-                full_response += chunk
-                await websocket.send_json({"type": "chunk", "content": chunk})
+            if user_type == "adm":
+                fluxo = responder_com_ferramentas(
+                    provider,
+                    db,
+                    messages,
+                    ao_status=_enviar_status(websocket),
+                    ao_relatorio=_enviar_relatorio(websocket),
+                )
+            else:
+                fluxo = provider.stream_chat(messages)
+            try:
+                async for chunk in fluxo:
+                    if first_token_at is None:
+                        first_token_at = time.time()
+                        turn_timer.record(
+                            "t_llm_first_token", (first_token_at - start_time) * 1000
+                        )
+                    full_response += chunk
+                    await websocket.send_json({"type": "chunk", "content": chunk})
+            except WebSocketDisconnect:
+                raise
+            except Exception:
+                logger.exception(f"Falha ao gerar a resposta da conversa {conv_id}")
+                await db.rollback()
+                full_response = await _responder_falha(websocket, full_response)
 
             latency_ms = int((time.time() - start_time) * 1000)
             turn_timer.record("t_llm_total", latency_ms)
 
-            with turn_timer.measure("t_persist_user_msg"):
-                await chat_service.save_message(
-                    db, conv_id, "user", user_message
-                )
-
-            with turn_timer.measure("t_persist_assistant"):
-                assistant_message = await chat_service.save_message(
-                    db, conv_id, "assistant", full_response
-                )
-
-            chunks_used_audit = [
-                {
-                    "source": c.source,
-                    "score": c.score,
-                    "preview": c.content[:200],
-                }
-                for c in rag_chunks
-            ]
-
-            with turn_timer.measure("t_persist_audit"):
-                await chat_service.save_llm_audit(
-                    db=db,
-                    user_id=user_id,
-                    conversation_id=conv_id,
-                    message_id=assistant_message.id,
-                    prompt_full=messages,
-                    llm_provider=provider.get_provider_name(),
-                    llm_model=provider.get_model_name(),
-                    latency_ms=latency_ms,
-                    chunks_used=chunks_used_audit,
-                    action_emitted=action.slug if action else None,
+            with turn_timer.measure("t_persist_turno"):
+                await chat_service.persist_turn(
+                    db,
+                    conv_id,
+                    user_message,
+                    recebida_em,
+                    full_response,
+                    audit={
+                        "user_id": user_id,
+                        "prompt_full": messages,
+                        "llm_provider": provider.get_provider_name(),
+                        "llm_model": provider.get_model_name(),
+                        "latency_ms": latency_ms,
+                        "chunks_used": [
+                            {
+                                "source": c.source,
+                                "score": c.score,
+                                "preview": c.content[:200],
+                            }
+                            for c in rag_chunks
+                        ],
+                        "action_emitted": action.slug if action else None,
+                    },
                 )
 
             if action is not None:
@@ -385,9 +404,15 @@ async def websocket_chat_public(
 
             start_time = time.time()
             full_response = ""
-            async for chunk in provider.stream_chat(messages):
-                full_response += chunk
-                await websocket.send_json({"type": "chunk", "content": chunk})
+            try:
+                async for chunk in provider.stream_chat(messages):
+                    full_response += chunk
+                    await websocket.send_json({"type": "chunk", "content": chunk})
+            except WebSocketDisconnect:
+                raise
+            except Exception:
+                logger.exception("Falha ao gerar a resposta no chat publico")
+                full_response = await _responder_falha(websocket, full_response)
 
             latency_ms = int((time.time() - start_time) * 1000)
 
@@ -433,6 +458,32 @@ async def websocket_chat_public(
             await websocket.close()
         except Exception:
             pass
+
+
+def _enviar_status(websocket: WebSocket):
+    async def enviar(mensagem: str) -> None:
+        await websocket.send_json({"type": "status", "message": mensagem})
+
+    return enviar
+
+
+def _enviar_relatorio(websocket: WebSocket):
+    async def enviar(relatorio: Relatorio) -> None:
+        await websocket.send_json({"type": "report", "report": relatorio.como_frame()})
+
+    return enviar
+
+
+FALHA_NO_TURNO = (
+    "Tive um problema para montar essa resposta agora. "
+    "Pode perguntar de novo em alguns segundos?"
+)
+
+
+async def _responder_falha(websocket: WebSocket, parcial: str) -> str:
+    complemento = FALHA_NO_TURNO if not parcial else "\n\n" + FALHA_NO_TURNO
+    await websocket.send_json({"type": "chunk", "content": complemento})
+    return parcial + complemento
 
 
 async def _stream_static_reply(websocket: WebSocket, text: str) -> None:

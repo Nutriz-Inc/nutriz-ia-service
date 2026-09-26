@@ -15,9 +15,7 @@
 # motivo (toda linha carrega descricao livre).
 
 from datetime import datetime
-from decimal import Decimal
-
-from sqlalchemy import Boolean, DateTime, Numeric, String
+from sqlalchemy import Boolean, DateTime, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database import Base
@@ -31,9 +29,6 @@ class Donation(Base):
     # (mesma regra do backend Go em ListDonationByFilters e no gate do GetDonation).
     created_by: Mapped[str] = mapped_column(String(36), nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False)
-    quantity_donated: Mapped[Decimal | None] = mapped_column(
-        Numeric(precision=10, scale=2), nullable=True
-    )
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
     removed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 

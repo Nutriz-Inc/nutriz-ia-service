@@ -12,6 +12,8 @@
 
 import os
 import zlib
+from pathlib import Path
+from decimal import Decimal
 from datetime import datetime, timedelta, timezone
 from typing import AsyncIterator
 
@@ -25,6 +27,8 @@ os.environ["DATABASE_URL"] = TEST_DATABASE_URL
 os.environ["JWT_SECRET"] = "segredo-de-teste"
 os.environ["GROQ_API_KEY"] = "chave-fake-de-teste"
 os.environ["LLM_PROVIDER"] = "groq"
+os.environ["AQUECER_NO_STARTUP"] = "false"
+os.environ["GROQ_MODELOS_RESERVA"] = ""
 
 import jwt as pyjwt
 import numpy as np
@@ -37,9 +41,11 @@ from sqlalchemy.pool import NullPool
 from app import models  # noqa: F401 - registra todas as tabelas no Base.metadata
 from app.config import settings
 from app.database import Base, get_db
-from app.llm.provider import LLMProvider, get_llm_provider
+from app.llm.provider import EventoDoModelo, LLMProvider, get_llm_provider
 from app.services.embeddings import embeddings_service
 
+
+ESQUEMA_GO_LOCAL = Path(__file__).resolve().parent.parent / "scripts" / "esquema_go_local.sql"
 
 SEED_USER_ID = "f058115f-51cb-4eb6-b7b9-7e2397299641"
 SEED_USER_NAME = "Usuaria Teste"
@@ -96,11 +102,27 @@ class FakeProvider(LLMProvider):
     def __init__(self, chunks: tuple[str, ...] = ("Ola, ", "sou a EVA ", "de teste.")) -> None:
         self.chunks = chunks
         self.calls: list[list[dict[str, str]]] = []
+        self.roteiro: list[list[EventoDoModelo]] = []
+        self.pedidos_com_ferramentas: list[dict] = []
 
     async def stream_chat(self, messages: list[dict[str, str]]) -> AsyncIterator[str]:
         self.calls.append(messages)
         for chunk in self.chunks:
             yield chunk
+
+    async def stream_com_ferramentas(
+        self, messages, ferramentas, obrigar_ferramenta: bool = False
+    ) -> AsyncIterator[EventoDoModelo]:
+        self.pedidos_com_ferramentas.append(
+            {"ferramentas": ferramentas, "obrigar": obrigar_ferramenta}
+        )
+        if not self.roteiro:
+            async for texto in self.stream_chat(messages):
+                yield EventoDoModelo(texto=texto)
+            return
+        self.calls.append(list(messages))
+        for evento in self.roteiro.pop(0):
+            yield evento
 
     def get_provider_name(self) -> str:
         return "fake"
@@ -139,6 +161,8 @@ async def test_engine():
     async with engine.begin() as conn:
         await conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
         await conn.run_sync(Base.metadata.create_all)
+        bruta = await conn.get_raw_connection()
+        await bruta.driver_connection.execute(ESQUEMA_GO_LOCAL.read_text(encoding="utf-8"))
     yield engine
     await engine.dispose()
 
@@ -161,8 +185,9 @@ async def db_session(test_engine) -> AsyncIterator[AsyncSession]:
         await conn.execute(
             text(
                 'TRUNCATE TABLE llm_audit, messages, conversations, kb_chunks, '
-                'consent_log, user_baby, donation_step, donation, '
-                'donation_point, address, "user" CASCADE'
+                'consent_log, user_baby, bottle, donation_step, donation, '
+                'donation_point, address, route, route_donation_step, job, '
+                '"user" CASCADE'
             )
         )
         await conn.commit()
@@ -271,6 +296,29 @@ async def insert_donation_step(
     await db_session.commit()
 
 
+async def insert_bottle(
+    db_session: AsyncSession,
+    id_bottle: str,
+    id_donation: str,
+    ml: str,
+    discarded: bool = False,
+) -> None:
+    await db_session.execute(
+        text(
+            "INSERT INTO bottle (id_bottle, id_donation, quantity_donated_ml, "
+            "discarded, created_at) VALUES (:id, :id_donation, :ml, :discarded, :now)"
+        ),
+        {
+            "id": id_bottle,
+            "id_donation": id_donation,
+            "ml": Decimal(ml),
+            "discarded": discarded,
+            "now": datetime.now(timezone.utc).replace(tzinfo=None),
+        },
+    )
+    await db_session.commit()
+
+
 @pytest_asyncio.fixture(loop_scope="session")
 async def seed_donations(db_session: AsyncSession, seed_user: str) -> str:
     now = _naive_now()
@@ -300,7 +348,7 @@ async def seed_donations(db_session: AsyncSession, seed_user: str) -> str:
     await db_session.execute(
         text(
             "INSERT INTO donation (id_donation, created_by, is_active, "
-            "quantity_donated, created_at) VALUES (:id, :user, false, 700.00, :created)"
+            "created_at) VALUES (:id, :user, false, :created)"
         ),
         {"id": SEED_DONATION_OLD_ID, "user": seed_user, "created": now - timedelta(days=90)},
     )
@@ -308,11 +356,17 @@ async def seed_donations(db_session: AsyncSession, seed_user: str) -> str:
     await db_session.execute(
         text(
             "INSERT INTO donation (id_donation, created_by, is_active, "
-            "quantity_donated, created_at) VALUES (:id, :user, true, 550.00, :created)"
+            "created_at) VALUES (:id, :user, true, :created)"
         ),
         {"id": SEED_DONATION_ACTIVE_ID, "user": seed_user, "created": now - timedelta(days=10)},
     )
     await db_session.commit()
+
+    await insert_bottle(db_session, "fr_antiga_1", SEED_DONATION_OLD_ID, "250.00")
+    await insert_bottle(db_session, "fr_antiga_2", SEED_DONATION_OLD_ID, "250.00")
+    await insert_bottle(db_session, "fr_antiga_3", SEED_DONATION_OLD_ID, "200.00")
+    await insert_bottle(db_session, "fr_ativa_1", SEED_DONATION_ACTIVE_ID, "250.00")
+    await insert_bottle(db_session, "fr_ativa_2", SEED_DONATION_ACTIVE_ID, "300.00")
 
     await insert_donation_step(
         db_session, "dst_exame", SEED_DONATION_ACTIVE_ID, "Exame de sangue",

@@ -21,6 +21,7 @@ from tests.conftest import (
     SEED_DONATION_ACTIVE_ID,
     SEED_DONATION_POINT_NAME,
     SEED_USER_ID,
+    insert_bottle,
     insert_donation_step,
 )
 
@@ -258,11 +259,11 @@ async def test_doacao_de_outra_nutriz_nao_vaza(
     await db_session.execute(
         text(
             "INSERT INTO donation (id_donation, created_by, is_active, "
-            "quantity_donated, created_at) VALUES "
-            "('don_outra', 'outra-nutriz', true, 9999.00, :now)"
+            "created_at) VALUES ('don_outra', 'outra-nutriz', true, :now)"
         ),
         {"now": now},
     )
+    await insert_bottle(db_session, "fr_outra", "don_outra", "9999.00")
     await db_session.commit()
 
     context = await get_donation_context(db_session, seed_donations)
@@ -272,6 +273,19 @@ async def test_doacao_de_outra_nutriz_nao_vaza(
     assert context.history.total_volume_ml == Decimal("1250.00")
     assert context.donation is not None
     assert context.donation.id_donation != "don_outra"
+
+
+async def test_frasco_descartado_nao_entra_no_volume(
+    db_session: AsyncSession, seed_donations: str
+):
+    await insert_bottle(
+        db_session, "fr_descartado", SEED_DONATION_ACTIVE_ID, "250.00", discarded=True
+    )
+
+    context = await get_donation_context(db_session, seed_donations)
+
+    assert context.history is not None
+    assert context.history.total_volume_ml == Decimal("1250.00")
 
 
 async def test_doacao_removida_e_ignorada(

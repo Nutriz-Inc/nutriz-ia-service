@@ -382,23 +382,6 @@ class TestContextoDosPapeisDaEquipe:
 
         assert "nenhuma rota atribuida" in _format_routes_as_context([], None, [])
 
-    def test_dashboard_vazio_devolve_none(self):
-        from app.services.eva_prompt import _format_dashboard_as_context
-
-        assert _format_dashboard_as_context(None) is None
-        assert _format_dashboard_as_context({}) is None
-
-    def test_dashboard_formata_os_agregados(self):
-        from app.services.eva_prompt import _format_dashboard_as_context
-
-        bloco = _format_dashboard_as_context(
-            {"total_milk_collected": 12450, "average_route_duration_hours": 5.4}
-        )
-
-        assert "12450" in bloco
-        assert "5,4" in bloco
-        assert "nunca de uma pessoa" in bloco
-
 
 class TestSituacaoRealDaRota:
     """Regressao do bug relatado em producao: a EVA dizia que a ultima rota,

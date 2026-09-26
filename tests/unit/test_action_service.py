@@ -192,3 +192,25 @@ class TestNavegacaoNaoDisparaAToa:
             detect_action("como armazenar o leite?", is_anonymous=False).slug
             == "articles"
         )
+
+
+class TestRelatorioDoPainel:
+    def test_relatorio_do_painel_oferece_a_impressao_do_dashboard(self):
+        acao = detect_action("gera o relatorio do painel", is_anonymous=False, user_type="adm")
+
+        assert acao is not None
+        assert acao.slug == "dashboard_report"
+
+    def test_relatorio_pedido_a_eva_nao_duplica_com_o_botao_do_painel(self):
+        acao = detect_action(
+            "gera um relatorio das doadoras com exame vencendo",
+            is_anonymous=False,
+            user_type="adm",
+        )
+
+        assert acao is None or acao.slug != "dashboard_report"
+
+    def test_so_o_adm_recebe_o_botao_do_painel(self):
+        acao = detect_action("relatorio do painel", is_anonymous=False, user_type="nurse")
+
+        assert acao is None or acao.slug != "dashboard_report"
