@@ -3,6 +3,7 @@ import json
 import logging
 import time
 import traceback
+from datetime import datetime, timezone
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query, WebSocket, WebSocketDisconnect
@@ -188,6 +189,7 @@ async def websocket_chat(
                 continue
 
             turn_timer = PhaseTimer()
+            recebida_em = datetime.now(timezone.utc)
 
             with turn_timer.measure("t_history_e_embedding"):
                 history, query_embedding = await asyncio.gather(
@@ -240,37 +242,29 @@ async def websocket_chat(
             latency_ms = int((time.time() - start_time) * 1000)
             turn_timer.record("t_llm_total", latency_ms)
 
-            with turn_timer.measure("t_persist_user_msg"):
-                await chat_service.save_message(
-                    db, conv_id, "user", user_message
-                )
-
-            with turn_timer.measure("t_persist_assistant"):
-                assistant_message = await chat_service.save_message(
-                    db, conv_id, "assistant", full_response
-                )
-
-            chunks_used_audit = [
-                {
-                    "source": c.source,
-                    "score": c.score,
-                    "preview": c.content[:200],
-                }
-                for c in rag_chunks
-            ]
-
-            with turn_timer.measure("t_persist_audit"):
-                await chat_service.save_llm_audit(
-                    db=db,
-                    user_id=user_id,
-                    conversation_id=conv_id,
-                    message_id=assistant_message.id,
-                    prompt_full=messages,
-                    llm_provider=provider.get_provider_name(),
-                    llm_model=provider.get_model_name(),
-                    latency_ms=latency_ms,
-                    chunks_used=chunks_used_audit,
-                    action_emitted=action.slug if action else None,
+            with turn_timer.measure("t_persist_turno"):
+                await chat_service.persist_turn(
+                    db,
+                    conv_id,
+                    user_message,
+                    recebida_em,
+                    full_response,
+                    audit={
+                        "user_id": user_id,
+                        "prompt_full": messages,
+                        "llm_provider": provider.get_provider_name(),
+                        "llm_model": provider.get_model_name(),
+                        "latency_ms": latency_ms,
+                        "chunks_used": [
+                            {
+                                "source": c.source,
+                                "score": c.score,
+                                "preview": c.content[:200],
+                            }
+                            for c in rag_chunks
+                        ],
+                        "action_emitted": action.slug if action else None,
+                    },
                 )
 
             if action is not None:
