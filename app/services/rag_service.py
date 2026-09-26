@@ -67,6 +67,6 @@ async def search_chunks(
         )
 
     logger.info(
-        f"Busca semantica retornou {len(search_results)} chunks para query: '{query[:50]}...'"
+        f"Busca semantica retornou {len(search_results)} chunks"
     )
     return search_results
