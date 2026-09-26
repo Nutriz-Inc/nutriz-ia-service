@@ -10,7 +10,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
-from app.routers import chat_ws, conversations, health, me, session
+from app.routers import analytics, chat_ws, conversations, health, me, session
 from app.services.aquecimento import aquecer_dependencias
 from app.services.embeddings import embeddings_service
 
@@ -54,3 +54,4 @@ app.include_router(me.router)
 app.include_router(session.router)
 app.include_router(chat_ws.router)
 app.include_router(conversations.router)
+app.include_router(analytics.router)
