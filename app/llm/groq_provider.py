@@ -28,9 +28,11 @@ class GroqProvider(LLMProvider):
         await self.client.models.list()
 
     def _parametros_de_raciocinio(self) -> dict[str, str] | None:
-        if not settings.GROQ_MODEL.startswith("openai/gpt-oss"):
-            return None
-        return {"reasoning_effort": settings.GROQ_REASONING_EFFORT}
+        if settings.GROQ_MODEL.startswith("qwen/"):
+            return {"reasoning_effort": "none"}
+        if settings.GROQ_MODEL.startswith("openai/gpt-oss"):
+            return {"reasoning_effort": settings.GROQ_REASONING_EFFORT}
+        return None
 
     def get_provider_name(self) -> str:
         return "groq"

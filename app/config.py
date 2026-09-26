@@ -30,7 +30,7 @@ class Settings(BaseSettings):
     GROQ_API_KEY: str = ""
     OPENROUTER_API_KEY: str = ""
     OLLAMA_BASE_URL: str = "http://localhost:11434"
-    GROQ_MODEL: str = "openai/gpt-oss-120b"
+    GROQ_MODEL: str = "qwen/qwen3.8-27b"
     GROQ_REASONING_EFFORT: str = "low"
     LLM_MAX_TOKENS: int = 1200
     LLM_TEMPERATURE: float = 0.3

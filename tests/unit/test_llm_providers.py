@@ -108,10 +108,16 @@ async def test_groq_gpt_oss_pede_raciocinio_curto(monkeypatch: pytest.MonkeyPatc
     assert captured["temperature"] == settings.LLM_TEMPERATURE
 
 
+async def test_groq_qwen_responde_sem_raciocinio(monkeypatch: pytest.MonkeyPatch):
+    captured = await _parametros_enviados(monkeypatch, "qwen/qwen3.8-27b")
+
+    assert captured["extra_body"] == {"reasoning_effort": "none"}
+
+
 async def test_groq_outro_modelo_nao_recebe_reasoning_effort(
     monkeypatch: pytest.MonkeyPatch,
 ):
-    captured = await _parametros_enviados(monkeypatch, "qwen/qwen3.6-27b")
+    captured = await _parametros_enviados(monkeypatch, "meta-llama/llama-4-scout")
 
     assert captured["extra_body"] is None
 
