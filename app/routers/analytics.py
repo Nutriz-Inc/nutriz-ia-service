@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
 from app.services.analytics import consultas
-from app.services.analytics.periodo import resolver_periodo
+from app.services.analytics.periodo import hoje_em_brasilia, resolver_periodo
 from app.services.auth import get_current_user_id
 from app.services.profile_service import get_user_type
 
@@ -25,6 +25,7 @@ Consulta = Literal[
     "regioes",
     "alertas",
     "operacao_agora",
+    "agenda",
 ]
 
 _cache: dict[tuple, tuple[float, dict[str, Any]]] = {}
@@ -49,7 +50,11 @@ async def _executar(
     inicio: date | None,
     fim: date | None,
     agrupar_por: str,
+    dia: date | None = None,
+    ignorar: str | None = None,
 ) -> dict[str, Any]:
+    if consulta == "agenda":
+        return await consultas.agenda_do_dia(db, dia or hoje_em_brasilia(), ignorar)
     if consulta == "alertas":
         return await consultas.alertas(db)
     if consulta == "operacao_agora":
@@ -68,9 +73,14 @@ async def ler_indicador(
     inicio: date | None = None,
     fim: date | None = None,
     agrupar_por: Literal["cidade", "bairro"] = "cidade",
+    data: date | None = None,
+    ignorar: str | None = Query(default=None, max_length=36),
     _: str = Depends(exigir_adm),
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
+    if consulta == "agenda":
+        return await _executar(db, consulta, None, None, None, agrupar_por, data, ignorar)
+
     chave = (consulta, periodo, inicio, fim, agrupar_por)
     agora = time.monotonic()
     guardado = _cache.get(chave)
