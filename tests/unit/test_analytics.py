@@ -367,3 +367,33 @@ async def test_quilometragem_implausivel_fica_fora_do_km_por_litro(cenario: Asyn
     assert dados["km_rodados"] == 40.0
     assert dados["km_por_litro_coletado"] == pytest.approx(30.77, abs=0.01)
     assert motoristas["Marta Motorista"]["km_rodados"] == 0.0
+
+
+async def test_agenda_conta_visitas_por_hora_de_brasilia(db_session: AsyncSession):
+    dia = date(2026, 10, 5)
+    await _usuario(db_session, "doa_agenda", "common", "Luana Prado")
+    await _doacao(db_session, "don_agenda", "doa_agenda", True, _agora())
+    await db_session.commit()
+
+    as_dez = datetime(2026, 10, 5, 13, 0)
+    await insert_donation_step(db_session, "ag_1", "don_agenda", "Coletar leite", "pending", _agora(), set_date=as_dez)
+    await insert_donation_step(db_session, "ag_2", "don_agenda", "Exame de sangue", "pending", _agora(), set_date=as_dez)
+    await insert_donation_step(db_session, "ag_3", "don_agenda", "Entregar kit de ordenha", "done", _agora(), set_date=as_dez)
+    await insert_donation_step(db_session, "ag_4", "don_agenda", "Coletar leite", "pending", _agora(), set_date=datetime(2026, 10, 5, 17, 30))
+    await insert_donation_step(db_session, "ag_erro", "don_agenda", "Coletar leite", "failed", _agora(), set_date=as_dez)
+    await insert_donation_step(db_session, "ag_lab", "don_agenda", "Análise de leite", "pending", _agora(), set_date=as_dez)
+    await insert_donation_step(db_session, "ag_outro_dia", "don_agenda", "Coletar leite", "pending", _agora(), set_date=datetime(2026, 10, 6, 13, 0))
+
+    dados = await consultas.agenda_do_dia(db_session, dia)
+    por_hora = {h["hora"]: h for h in dados["horarios"]}
+
+    assert dados["agendados_no_dia"] == 4
+    assert por_hora[10]["agendados"] == 3
+    assert por_hora[10]["lotado"] is True
+    assert por_hora[10]["vagas"] == 0
+    assert por_hora[14]["agendados"] == 1
+    assert por_hora[14]["lotado"] is False
+    assert dados["dia_lotado"] is False
+
+    sem_a_propria = await consultas.agenda_do_dia(db_session, dia, ignorar="ag_1")
+    assert {h["hora"]: h for h in sem_a_propria["horarios"]}[10]["lotado"] is False

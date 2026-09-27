@@ -77,3 +77,17 @@ async def test_consulta_desconhecida_devolve_422(app_with_overrides, db_session)
             "/analytics/senhas", headers={"Authorization": f"Bearer {token}"}
         )
     assert resposta.status_code == 422
+
+
+async def test_adm_le_a_agenda_do_dia_sem_cache(app_with_overrides, db_session):
+    token = await _usuario(db_session, "u-adm", "adm")
+    async with _client(app_with_overrides) as client:
+        resposta = await client.get(
+            "/analytics/agenda?data=2026-10-05",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+    assert resposta.status_code == 200
+    dados = resposta.json()
+    assert dados["data"] == "2026-10-05"
+    assert dados["capacidade_por_horario"] == 3
+    assert analytics._cache == {}

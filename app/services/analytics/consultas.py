@@ -1,14 +1,16 @@
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Any
 
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import settings
 from app.services.analytics.periodo import (
     FUSO_BRASILIA,
     Periodo,
     agora_utc,
+    para_utc_ingenuo,
     resolver_periodo,
 )
 from app.services.analytics.privacidade import (
@@ -962,4 +964,60 @@ async def listar_agendamentos(
             }
             for linha in linhas
         ],
+    }
+
+
+ETAPAS_COM_VISITA = ("Exame de sangue", "Entregar kit de ordenha", "Coletar leite")
+
+
+async def agenda_do_dia(
+    db: AsyncSession, dia: date, ignorar: str | None = None
+) -> dict[str, Any]:
+    linhas = await _linhas(
+        db,
+        """
+        SELECT EXTRACT(HOUR FROM ds.set_date - INTERVAL '3 hours')::int AS hora,
+               COUNT(*) AS agendados
+        FROM donation_step ds
+        JOIN donation d ON d.id_donation = ds.id_donation AND d.removed_at IS NULL
+        WHERE ds.set_date >= :ini AND ds.set_date < :fim
+          AND ds.name::text = ANY(:etapas)
+          AND ds.status::text <> 'failed'
+          AND (CAST(:ignorar AS text) IS NULL OR ds.id_donation_step <> CAST(:ignorar AS text))
+        GROUP BY 1
+        """,
+        ini=para_utc_ingenuo(dia),
+        fim=para_utc_ingenuo(dia + timedelta(days=1)),
+        etapas=list(ETAPAS_COM_VISITA),
+        ignorar=ignorar,
+    )
+    por_hora = {_inteiro(linha["hora"]): _inteiro(linha["agendados"]) for linha in linhas}
+    total = sum(por_hora.values())
+    limite_hora = settings.CAPACIDADE_POR_HORARIO
+    limite_dia = settings.CAPACIDADE_POR_DIA
+
+    horarios = [
+        {
+            "hora": hora,
+            "agendados": por_hora.get(hora, 0),
+            "vagas": max(limite_hora - por_hora.get(hora, 0), 0),
+            "lotado": por_hora.get(hora, 0) >= limite_hora,
+        }
+        for hora in range(settings.AGENDA_ABRE_AS, settings.AGENDA_FECHA_AS + 1)
+    ]
+    fora_do_expediente = sum(
+        quantidade
+        for hora, quantidade in por_hora.items()
+        if hora < settings.AGENDA_ABRE_AS or hora > settings.AGENDA_FECHA_AS
+    )
+
+    return {
+        "data": dia.isoformat(),
+        "capacidade_por_horario": limite_hora,
+        "capacidade_por_dia": limite_dia,
+        "agendados_no_dia": total,
+        "vagas_no_dia": max(limite_dia - total, 0),
+        "dia_lotado": total >= limite_dia,
+        "agendados_fora_do_expediente": fora_do_expediente,
+        "horarios": horarios,
     }
