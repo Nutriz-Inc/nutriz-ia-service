@@ -40,6 +40,10 @@ class Settings(BaseSettings):
     # de vocabulario podado (250k->50k tokens). Ver docs/otimizacao-memoria.md.
     EMBEDDINGS_MODEL_DIR: str = "/models"
     AQUECER_NO_STARTUP: bool = True
+    CAPACIDADE_POR_HORARIO: int = 3
+    CAPACIDADE_POR_DIA: int = 12
+    AGENDA_ABRE_AS: int = 7
+    AGENDA_FECHA_AS: int = 18
     APP_ENV: str = "development"
     LOG_LEVEL: str = "INFO"
 

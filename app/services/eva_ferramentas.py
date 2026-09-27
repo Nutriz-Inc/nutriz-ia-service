@@ -7,7 +7,13 @@ from pydantic import BaseModel, Field, ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.services.analytics import consultas
-from app.services.analytics.periodo import PRESETS, Periodo, agora_utc, resolver_periodo
+from app.services.analytics.periodo import (
+    PRESETS,
+    Periodo,
+    agora_utc,
+    hoje_em_brasilia,
+    resolver_periodo,
+)
 
 LINHAS_PARA_O_MODELO = 8
 ITENS_POR_LISTA_NO_MODELO = LINHAS_PARA_O_MODELO
@@ -38,6 +44,7 @@ Tema = Literal[
     "desempenho_motoristas",
     "desempenho_enfermagem",
     "regioes",
+    "agenda_do_dia",
 ]
 TipoDeRelatorio = Literal[
     "visao_geral",
@@ -120,7 +127,8 @@ FERRAMENTAS: list[dict[str, Any]] = [
                 "Indicadores agregados. visao_geral: litros, frascos, descarte, doadoras, "
                 "satisfacao. cadeia_fria: regra das 6h e rotas em andamento. logistica: km "
                 "por litro, paradas, imprevistos. funil_doadora: conversao por etapa e "
-                "gargalo. regioes: litros por cidade ou bairro."
+                "gargalo. regioes: litros por cidade ou bairro. agenda_do_dia: vagas por "
+                "horario no dia data_inicio (padrao hoje), com o limite operacional."
             ),
             "parameters": {
                 "type": "object",
@@ -260,6 +268,8 @@ async def _indicadores(db: AsyncSession, args: ArgumentosDeIndicadores) -> dict[
         return await consultas.funil_doadora(db, periodo)
     if args.tema == "desempenho_motoristas":
         return await consultas.desempenho_motoristas(db, periodo)
+    if args.tema == "agenda_do_dia":
+        return await consultas.agenda_do_dia(db, args.data_inicio or hoje_em_brasilia())
     if args.tema == "desempenho_enfermagem":
         return await consultas.desempenho_enfermagem(db, periodo)
     return await consultas.regioes(db, periodo, args.agrupar_regiao_por)
